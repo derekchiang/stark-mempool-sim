@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STARK mempool sim — viewer</title>
+<style>
+  :root {
+    /* Matisse-pastel scheme: warm cream paper, cobalt / leaf / coral marks */
+    --surface: #faf6ec; --panel: #f2ead8; --ink: #211d15; --ink2: #6b6150;
+    --grid: #e2d7bf; --priv: #2d73d8; --pq: #12a37e; --agg: #e5653a;
+    --flash: #d29413; --ghost: #c2b69f;
+    /* pastel washes, decorative chrome only (stat tiles) — never data encoding */
+    --wash-sky: #dde9f0; --wash-rose: #f2ddd3; --wash-sage: #e2ecd9; --wash-butter: #f5eac6;
+    /* per-aggregator identity colors (sprites + their arrows), deliberately a
+       separate family from the item colors; the set passes the all-pairs
+       colorblind-separation checks against surface --panel */
+    --aggregator0: #9c5ce4; --aggregator1: #d6408d; --aggregator2: #8d6d15;
+    --aggregator3: #4f4794; --aggregator4: #a01f2a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface); color: var(--ink);
+         font: 14px/1.45 system-ui, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 14px; padding: 10px 16px 0; }
+  header h1 { font-family: Georgia, "Iowan Old Style", "Palatino Linotype",
+                           "Liberation Serif", serif;
+              font-size: 19px; font-weight: 600; letter-spacing: .01em; margin: 0; }
+  header .sub { color: var(--ink2); font-size: 12px; }
+  #infowrap { margin-left: auto; position: relative; }
+  #infopanel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10;
+               background: var(--panel); border: 1px solid var(--grid);
+               border-radius: 10px; padding: 8px 12px; width: max-content;
+               box-shadow: 0 4px 14px rgba(87, 61, 24, .14); font-size: 12px; }
+  #infopanel div { white-space: nowrap; padding: 1px 0; color: var(--ink2); }
+  #infopanel b { color: var(--ink); font-weight: 600; display: inline-block;
+                 min-width: 92px; }
+  #controls { display: flex; align-items: center; gap: 10px; padding: 8px 16px; flex-wrap: wrap; }
+  button { background: var(--panel); color: var(--ink); border: 1px solid var(--grid);
+           border-radius: 999px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--ink2); }
+  button.on { background: var(--ink); color: var(--surface); }
+  #speedv { min-width: 44px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+  #stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 4px 16px 8px; }
+  .tile { background: var(--panel); border-radius: 10px; padding: 6px 10px; }
+  .tile:nth-child(1) { background: var(--wash-sky); }
+  .tile:nth-child(2) { background: var(--wash-rose); }
+  .tile:nth-child(3) { background: var(--wash-sage); }
+  .tile:nth-child(4) { background: var(--wash-butter); }
+  .tile .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile .k { color: var(--ink2); font-size: 11px; }
+  #ticker { margin: 0 16px; height: 26px; background: var(--panel); border-radius: 13px;
+            position: relative; overflow: hidden; }
+  #tickfill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--grid); }
+  #ticker.boundary #tickfill { background: var(--flash); }
+  #ticklabel { position: absolute; inset: 0; display: flex; align-items: center;
+               justify-content: center; font-size: 12px; color: var(--ink); z-index: 1;
+               font-variant-numeric: tabular-nums; }
+  #main { padding: 10px 16px 16px; }
+  #poolwrap { background: var(--panel); border-radius: 10px; position: relative;
+              height: max(560px, calc(100vh - 340px)); }
+  #pool { width: 100%; height: 100%; display: block; }
+  #legend { position: absolute; right: 10px; top: 8px; font-size: 11px; color: var(--ink2);
+            display: flex; gap: 12px; }
+  #aggregator_header { position: absolute; left: 14px; top: 24px; z-index: 1; display: flex;
+                       align-items: center; gap: 5px; font-size: 10px; color: var(--ink2); }
+  #aggregator_header button { padding: 0 7px; font-size: 12px; line-height: 16px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+        margin-right: 4px; vertical-align: -1px; }
+  #status { padding: 0 16px 12px; color: var(--ink2); font-size: 11px; }
+  #blocks { margin: 8px 16px 0; }
+  #blkrow { display: flex; gap: 6px; justify-content: flex-end; overflow: hidden; }
+  .blk { background: var(--panel); border: 1px solid var(--grid); border-radius: 8px;
+         padding: 4px 8px; min-width: 78px; text-align: center; flex: 0 0 auto; }
+  .blk .n { color: var(--ink2); font-size: 10px; }
+  .blk .t { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .blk .s { color: var(--ink2); font-size: 10px; }
+  .blk .s.c { max-width: 150px; margin: 0 auto; }
+  .blk.newest { border-color: var(--flash);
+                box-shadow: 0 0 0 2px color-mix(in srgb, var(--flash) 40%, transparent); }
+  .blk.empty .t { color: var(--ink2); }
+</style>
+</head>
+<body>
+<header>
+  <h1>EIP-8288 STARK mempool — viewer</h1>
+  <div class="sub" id="cfgline">waiting for trace.jsonl …</div>
+  <div id="infowrap">
+    <button id="info">ⓘ info</button>
+    <div id="infopanel" hidden>
+      <div><b>r</b> fold time, ms — one 2-to-1 fold</div>
+      <div><b>l</b> link latency, ms</div>
+      <div><b>N</b> number of aggregators</div>
+      <div><b>B</b> builder folds per slot — up to B+1 items into the block's final STARK</div>
+      <div><b>lambda_priv</b> privacy txs per second — one raw STARK each</div>
+      <div><b>lambda_pq</b> PQ txs per second — sig only (needs to get aggregated)</div>
+      <div><b>slot_length</b> slot length, ms — block built at each boundary</div>
+      <div><b>slots_n</b> run length, slots</div>
+    </div>
+  </div>
+</header>
+
+<div id="controls">
+  <button id="play">⏸ pause</button>
+  <button id="restart">↺ replay</button>
+  <label style="color:var(--ink2);font-size:12px">speed
+    <input id="speed" type="range" min="0" max="11" step="1" value="4">
+  </label>
+  <span id="speedv">1×</span>
+</div>
+
+<div id="stats">
+  <div class="tile"><div class="v" id="s_items">–</div><div class="k">pool items</div></div>
+  <div class="tile"><div class="v" id="s_pending">–</div><div class="k">pending txs</div></div>
+  <div class="tile"><div class="v" id="s_tpb">–</div><div class="k">average txs per block</div></div>
+  <div class="tile"><div class="v" id="s_delay">–</div><div class="k">mean delay (slots)</div></div>
+</div>
+
+<div id="ticker"><div id="tickfill"></div><div id="ticklabel">slot –</div></div>
+
+<div id="blocks">
+  <div id="blkrow"></div>
+</div>
+
+<div id="main">
+  <div id="poolwrap">
+    <canvas id="pool"></canvas>
+    <div id="aggregator_header">aggregators
+      <button id="fewer_aggregators">−</button><button id="more_aggregators">+</button>
+    </div>
+    <div id="legend">
+      <span><span class="sw" style="background:var(--priv)"></span>Privacy app</span>
+      <span><span class="sw" style="background:var(--pq)"></span>PQ tx</span>
+      <span><span class="sw" style="background:var(--agg)"></span>Aggregate STARK</span>
+      <span><span class="sw" style="box-sizing:border-box;border:1.5px solid var(--agg);background:linear-gradient(to top,var(--agg) 55%,transparent 55%)"></span>fill = txs still pending; hollow = already included</span>
+    </div>
+  </div>
+</div>
+<div id="status">polling trace.jsonl …</div>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- trace feed
+const feed = {
+  events: [], tail: "", bytes: 0, cfg: null, lastPoll: "-", stalled: false,
+  async poll() {
+    try {
+      const resp = await fetch("trace.jsonl", { cache: "no-store" });
+      if (!resp.ok) throw new Error(resp.status);
+      const text = await resp.text();
+      if (text.length < this.bytes) { this.reset(); }        // new file
+      const fresh = text.slice(this.bytes - this.tail.length);
+      this.bytes = text.length;
+      const lines = (this.tail + fresh).split("\n");
+      this.tail = lines.pop();
+      for (const ln of lines) {
+        if (!ln.trim()) continue;
+        const e = JSON.parse(ln);
+        if (e.e === "cfg") {
+          e.slot_length ??= e.slot_ms; e.slots_n ??= e.slots;   // older trace keys
+          this.cfg = e; onCfg(e);
+        } else this.events.push(e);
+      }
+      this.stalled = false;
+    } catch (err) { this.stalled = true; }
+    this.lastPoll = new Date().toLocaleTimeString();
+  },
+  reset() { this.events = []; this.tail = ""; this.bytes = 0; player.hardReset(); }
+};
+setInterval(() => feed.poll(), 1000);
+feed.poll();
+
+// ---------------------------------------------------------------- sim state
+const state = {
+  items: new Map(),        // id -> {id,size,bornSize,tot,depth,kind,locked,x,y,tx,ty}
+  folds: [],               // agg id -> {a,b,as,bs,start,end} | null
+  blocks: [],              // {slot, priv, pq, item}
+  pending: 0, incSum: 0, delayMean: null,
+  lastInc: null, boundaryFlash: 0,
+};
+function resetState() {
+  state.items.clear();
+  state.folds = feed.cfg ? Array.from({ length: feed.cfg.n }, () => null) : [];
+  state.blocks = [];
+  state.pending = 0; state.incSum = 0;
+  state.delayMean = null; state.lastInc = null; state.boundaryFlash = 0;
+}
+function applyEvent(e) {
+  const items = state.items;
+  if (e.e === "arr") {
+    let it = items.get(e.item);
+    if (!it) { it = { id: e.item, kind: e.kind, depth: 0, locked: false }; items.set(e.item, it); }
+    it.size = e.size; it.bornSize = e.size; it.tot = e.size;
+    state.pending += 1;
+  } else if (e.e === "fs") {
+    const a = items.get(e.a), b = items.get(e.b);
+    if (a) a.locked = true;
+    if (b) b.locked = true;
+    state.folds[e.agg] = { a: e.a, b: e.b, as: e.as, bs: e.bs, start: e.t, end: e.t + (e.d ?? feed.cfg.r) };
+  } else if (e.e === "fd") {
+    // the fresh aggregate is born at its aggregator's sprite; undrawn
+    // aggregators (and pre-layout folds) fall back to the parents' midpoint
+    const sprite = spriteCenters[e.agg];
+    const old = [items.get(e.a), items.get(e.b)].filter(o => o && o.x !== undefined);
+    const x = sprite ? sprite.x : (old.length ? old.reduce((s, o) => s + o.x, 0) / old.length : undefined);
+    const y = sprite ? sprite.y : (old.length ? old.reduce((s, o) => s + o.y, 0) / old.length : undefined);
+    items.delete(e.a); items.delete(e.b);
+    items.set(e.item, { id: e.item, kind: "agg", size: e.size, bornSize: e.size,
+                        tot: e.tot, depth: e.depth, locked: false, x, y });
+    state.folds[e.agg] = null;
+  } else if (e.e === "inc") {
+    const kinds = [];
+    for (const id of e.items) {
+      const it = items.get(id);
+      if (it) {
+        kinds.push({ id, kind: it.kind, n: it.size });
+        it.size = 0;
+      } else {
+        kinds.push({ id, kind: "agg", n: null });
+      }
+    }
+    state.pending -= e.txs;
+    state.lastInc = { t: e.t, parts: kinds, txs: e.txs, folds: e.folds };
+  } else if (e.e === "upd") {
+    // ghost decay: the block ghosted txs inside objects it did not pick
+    for (const id in e.sizes) {
+      const it = items.get(+id);
+      if (it) it.size = e.sizes[id];
+    }
+  } else if (e.e === "dead") {
+    // discarded: covers no pending txs any more -- gone from every view
+    for (const id of e.items) items.delete(id);
+  } else if (e.e === "slot") {
+    state.pending = e.pending;
+    state.incSum += e.inc_priv + e.inc_pq; state.delayMean = e.delay_mean;
+    state.boundaryFlash = 1;
+    const picked = state.lastInc && state.lastInc.t === e.t ? state.lastInc : null;
+    state.blocks.push({ slot: e.slot, priv: e.inc_priv, pq: e.inc_pq,
+                        parts: picked ? picked.parts : null,
+                        folds: picked ? picked.folds : 0 });
+  }
+}
+
+// ---------------------------------------------------------------- player
+const player = {
+  simT: 0, cursor: 0, playing: true, speed: 1,
+  hardReset() { this.simT = 0; this.cursor = 0; resetState(); },
+  step(dtMs) {
+    if (this.playing) {
+      this.simT += dtMs * this.speed;
+    }
+    while (this.cursor < feed.events.length && feed.events[this.cursor].t <= this.simT) {
+      applyEvent(feed.events[this.cursor++]);
+    }
+  },
+};
+
+// ---------------------------------------------------------------- controls
+const $ = id => document.getElementById(id);
+function onCfg(cfg) {
+  $("cfgline").textContent =
+    `r=${cfg.r}${cfg.r_jitter ? `+U(0,${Math.round(cfg.r_jitter * 100)}%)` : ""} ms, ` +
+    `l=${cfg.l} ms, N=${cfg.n}, B=${cfg.b} builder folds, ` +
+    `lambda_priv=${cfg.lam_priv} tx/s, lambda_pq=${cfg.lam_pq} tx/s, ` +
+    `slot_length=${cfg.slot_length} ms, slots_n=${cfg.slots_n}, seed ${cfg.seed}`;
+  resetState();
+}
+$("play").onclick = () => {
+  player.playing = !player.playing;
+  $("play").textContent = player.playing ? "⏸ pause" : "⏵ play";
+};
+$("restart").onclick = () => {
+  player.hardReset(); player.playing = true;
+  $("play").textContent = "⏸ pause";
+};
+$("info").onclick = () => {
+  const p = $("infopanel");
+  p.hidden = !p.hidden;
+  $("info").classList.toggle("on", !p.hidden);
+};
+const SPEED_STEPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128];
+$("speed").oninput = () => {
+  player.speed = SPEED_STEPS[parseInt($("speed").value, 10)];
+  $("speedv").textContent = String(player.speed) + "×";
+};
+let shownAggregators = 1;
+const MAX_SHOWN_AGGREGATORS = 5;   // one identity color per drawn aggregator
+function updateShownAggregators(delta) {
+  const cap = Math.min(MAX_SHOWN_AGGREGATORS, feed.cfg ? feed.cfg.n : MAX_SHOWN_AGGREGATORS);
+  shownAggregators = Math.max(1, Math.min(cap, shownAggregators + delta));
+}
+$("more_aggregators").onclick = () => updateShownAggregators(+1);
+$("fewer_aggregators").onclick = () => updateShownAggregators(-1);
+
+// ---------------------------------------------------------------- pool canvas
+const canvas = $("pool"), ctx = canvas.getContext("2d");
+const css = getComputedStyle(document.documentElement);
+const C = name => css.getPropertyValue(name).trim();
+const spriteColor = i => C("--aggregator" + i) || C("--agg");
+let spriteCenters = [];   // agg id -> {x, y, side} in canvas coordinates
+function bandHeader(label, x0, y0, x1) {
+  ctx.fillStyle = C("--ink2"); ctx.font = "10px system-ui"; ctx.textAlign = "left";
+  ctx.fillText(label, x0, y0 - 8);
+  ctx.strokeStyle = C("--grid"); ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x0 + 8 + ctx.measureText(label).width, y0 - 11);
+  ctx.lineTo(x1, y0 - 11);
+  ctx.stroke();
+}
+function layoutBand(items, label, x0, y0, x1, yMax) {
+  bandHeader(label, x0, y0, x1);
+  let x = x0, y = y0, rowH = 0, hidden = 0;
+  for (const it of items) {
+    // footprint from the size at birth: a ghosting item drains its fill in
+    // place instead of shrinking and reshuffling the band
+    const basis = it.bornSize !== undefined ? it.bornSize : it.size;
+    const rad = Math.max(5, Math.min(46, 4.5 * Math.sqrt(Math.max(basis, 0.9))));
+    if (x + 2 * rad > x1) { x = x0; y += rowH + 18; rowH = 0; }
+    if (y + 2 * rad > yMax) { it.visible = false; hidden += 1; continue; }
+    it.visible = true;
+    it.tx = x + rad; it.ty = y + rad; rowH = Math.max(rowH, 2 * rad);
+    x += 2 * rad + 10;
+    if (it.x === undefined || it.y === undefined) { it.x = it.tx; it.y = it.ty; }
+    it.x += (it.tx - it.x) * 0.18; it.y += (it.ty - it.y) * 0.18;   // ease
+    it.rad = rad;
+  }
+  if (hidden) {
+    ctx.fillStyle = C("--ink2"); ctx.font = "11px system-ui"; ctx.textAlign = "left";
+    ctx.fillText(`… +${hidden} more (band overflows, backlog growing)`, x0, yMax - 2);
+  }
+}
+function drawAggregators(x0, y0, x1, y1) {
+  spriteCenters = [];
+  if (!feed.cfg || !feed.cfg.n) return;
+  const n = feed.cfg.n;
+  // draw a few examples: with round robin every aggregator behaves the
+  // same, and a fleet of sprites with 2 arrows each is unreadable
+  const shown = Math.min(shownAggregators, n);
+  // the band label + the -/+ buttons are the #aggregator_header HTML overlay;
+  // only the rule is drawn here, starting past it
+  ctx.strokeStyle = C("--grid"); ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x0 + $("aggregator_header").offsetWidth + 8, y0 - 11);
+  ctx.lineTo(x1, y0 - 11);
+  ctx.stroke();
+  if (shown < n) {
+    ctx.fillStyle = C("--ink2"); ctx.font = "11px system-ui"; ctx.textAlign = "left";
+    ctx.fillText(`… plus ${n - shown} more just like ${shown > 1 ? "them" : "it"}, not drawn`,
+                 x0, y1 - 6);
+    y1 -= 18;
+  }
+  const regionW = x1 - x0, regionH = y1 - y0;
+  // single column: vertically separated origins keep the arrows apart
+  const cols = 1, rows = shown;
+  const cellW = regionW / cols, cellH = regionH / rows;
+  const side = Math.max(10, Math.min(64, cellW - 8, cellH - 16));
+  for (let i = 0; i < shown; i++) {
+    const cx = x0 + (i % cols) * cellW + cellW / 2;
+    const cy = y0 + Math.floor(i / cols) * cellH + (cellH - 12) / 2;
+    const sx = cx - side / 2, sy = cy - side / 2;
+    spriteCenters[i] = { x: cx, y: cy, side };
+    const fold = state.folds[i];
+    ctx.strokeStyle = spriteColor(i); ctx.lineWidth = 1.5;
+    if (fold) {
+      // fill rises bottom-up over the fold's duration, draining on completion
+      const p = Math.max(0, Math.min(1, (player.simT - fold.start) / (fold.end - fold.start)));
+      roundRect(sx, sy, side, side, 4);
+      ctx.save(); ctx.clip();
+      ctx.fillStyle = spriteColor(i);
+      ctx.fillRect(sx, sy + side * (1 - p), side, side * p);
+      ctx.restore();
+      roundRect(sx, sy, side, side, 4); ctx.stroke();
+    } else {
+      // idle: hollow but still in its own color, so identity survives
+      ctx.globalAlpha = 0.5;
+      roundRect(sx, sy, side, side, 4); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    if (cellH - side >= 12) {
+      ctx.fillStyle = C("--ink2"); ctx.font = "10px system-ui"; ctx.textAlign = "center";
+      ctx.fillText(fold ? `${fold.as} ⊕ ${fold.bs} txs` : "idle", cx, sy + side + 12);
+    }
+  }
+}
+function drawArrows() {
+  // dashed arrows from the two items an aggregator is folding right now
+  // into its sprite
+  for (let i = 0; i < state.folds.length; i++) {
+    const fold = state.folds[i], sprite = spriteCenters[i];
+    if (!fold || !sprite) continue;
+    const p = Math.max(0, Math.min(1, (player.simT - fold.start) / (fold.end - fold.start)));
+    const ex = sprite.x + sprite.side / 2 + 2, ey = sprite.y;
+    for (const id of [fold.a, fold.b]) {
+      const it = state.items.get(id);
+      if (!it || it.x === undefined || !it.visible) continue;
+      const cx = (it.x + ex) / 2, cy = Math.max(it.y, ey) + 26;
+      ctx.globalAlpha = 0.3 + 0.5 * p;
+      ctx.strokeStyle = spriteColor(i); ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(it.x, it.y);
+      ctx.quadraticCurveTo(cx, cy, ex, ey);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // arrowhead at the sprite: inputs flow into the aggregator
+      const angle = Math.atan2(ey - cy, ex - cx);
+      ctx.beginPath();
+      ctx.moveTo(ex - 7 * Math.cos(angle - 0.45), ey - 7 * Math.sin(angle - 0.45));
+      ctx.lineTo(ex, ey);
+      ctx.lineTo(ex - 7 * Math.cos(angle + 0.45), ey - 7 * Math.sin(angle + 0.45));
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+function drawPool() {
+  const wrap = $("poolwrap");
+  const w = wrap.clientWidth, h = wrap.clientHeight, dpr = devicePixelRatio || 1;
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+    canvas.width = w * dpr; canvas.height = h * dpr;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  // left half: the aggregator fleet; right half, two bands: arrivals queue
+  // on top (oldest left), aggregates below (biggest first); a fresh
+  // aggregate glides from its aggregator's sprite over into the lower band
+  const splitX = Math.round(w / 2), midY = Math.round(h / 2);
+  ctx.strokeStyle = C("--grid"); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(splitX, 12); ctx.lineTo(splitX, h - 12); ctx.stroke();
+  drawAggregators(14, 44, splitX - 14, h - 14);
+  const all = [...state.items.values()];
+  const raw = all.filter(i => i.kind !== "agg").sort((a, b) => a.id - b.id);
+  const aggs = all.filter(i => i.kind === "agg")
+                  .sort((a, b) => ((b.bornSize ?? b.size) - (a.bornSize ?? a.size))
+                               || (a.id - b.id));
+  layoutBand(raw, "unaggregated", splitX + 14, 44, w - 14, midY - 16);
+  layoutBand(aggs, "aggregates", splitX + 14, midY + 28, w - 14, h - 14);
+  drawArrows();
+  for (const it of raw) if (it.visible) drawItem(it, it.rad);
+  for (const it of aggs) if (it.visible) drawItem(it, it.rad);
+}
+function drawItem(it, rad) {
+  const x = it.x, y = it.y;
+  ctx.globalAlpha = it.locked ? 0.45 : 1;
+  const col = it.size === 0 ? C("--ghost")
+            : it.kind === "agg" ? C("--agg")
+            : it.kind === "pq" ? C("--pq") : C("--priv");
+  ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = 2;
+  const born = it.bornSize !== undefined ? it.bornSize : it.size;
+  if (it.kind === "agg") {
+    // merge-tree glyph: triangle sized by the useful txs it was born with,
+    // height hints at fold depth; the solid share (bottom-up) is what is
+    // still useful now -- later blocks ghost txs out of it and drain the
+    // fill; a ghost (nothing left pending) draws hollow. Proof size (tot)
+    // stays undrawable: merging overlapping aggregates (the overlap is
+    // re-proved) keeps it additive, so it grows exponentially and pins
+    // every triangle at the radius clamp.
+    const hh = rad * (1 + Math.min(1, it.depth / 12) * 0.5);
+    const top = y - hh, bot = y + rad * 0.8;
+    ctx.beginPath();
+    ctx.moveTo(x, top); ctx.lineTo(x - rad, bot); ctx.lineTo(x + rad, bot);
+    ctx.closePath();
+    ctx.stroke();
+    if (it.size > 0) {
+      // area-true fill height: for an apex-up triangle the bottom band of
+      // height fraction f holds area fraction 1-(1-f)^2, so invert
+      const f = 1 - Math.sqrt(Math.max(0, 1 - it.size / born));
+      const bandH = (bot - top) * f;
+      ctx.save(); ctx.clip();
+      ctx.fillRect(x - rad, bot - bandH, 2 * rad, bandH);
+      // inner "branch" lines to suggest the merge tree
+      if (rad > 10) {
+        ctx.beginPath(); ctx.rect(x - rad, bot - bandH, 2 * rad, bandH); ctx.clip();
+        ctx.strokeStyle = C("--surface"); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bot);
+        ctx.moveTo(x - rad / 2, y + rad * 0.15); ctx.lineTo(x, y - hh / 3);
+        ctx.lineTo(x + rad / 2, y + rad * 0.15);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  } else if (it.kind === "pq") {
+    const s = rad * 1.6;
+    roundRect(x - s / 2, y - s / 2, s, s, 3);
+    it.size === 0 ? ctx.stroke() : ctx.fill();   // hollow = already included
+  } else {
+    ctx.beginPath(); ctx.arc(x, y, rad * 0.8, 0, 7);
+    it.size === 0 ? ctx.stroke() : ctx.fill();
+  }
+  if (it.size >= 1 || it.tot >= 1) {
+    ctx.globalAlpha = 1; ctx.fillStyle = C("--ink2");
+    ctx.font = "10px system-ui"; ctx.textAlign = "center";
+    const label = it.kind !== "agg" ? (it.size === 0 ? "" : String(it.size))
+                : it.size < born ? `${it.size} of ${born}` : String(it.size);
+    if (label) ctx.fillText(label, x, y + rad + 12);
+  }
+  ctx.globalAlpha = 1;
+}
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+// ---------------------------------------------------------------- block ribbon
+let blkCount = -1;
+function drawBlocks() {
+  if (state.blocks.length === blkCount) return;
+  blkCount = state.blocks.length;
+  const row = $("blkrow");
+  row.innerHTML = "";
+  const NAME = { agg: "agg", priv: "tx", pq: "sig" };
+  const shown = state.blocks.slice(-8);
+  shown.forEach((b, i) => {
+    const total = b.priv + b.pq;
+    const d = document.createElement("div");
+    d.className = "blk" + (total === 0 ? " empty" : "") +
+                  (i === shown.length - 1 ? " newest" : "");
+    let starks = "", tip = "nothing includable this slot";
+    if (b.parts && b.parts.length) {
+      const counts = b.parts.map(p => p.n == null ? "?" : p.n).join(" ⊕ ");
+      const names = b.parts.map(p =>
+        `${NAME[p.kind] || "agg"} #${p.id} (${p.n == null ? "?" : p.n} txs)`);
+      starks = `<div class="s c">final STARK = ${counts} txs</div>`;
+      tip = `builder folds ${names.join(" ⊕ ")} into the block's one final STARK (${b.folds} folds, budget B=${feed.cfg.b})`;
+    }
+    d.title = tip;
+    d.innerHTML =
+      `<div class="n">block ${b.slot}</div>` +
+      `<div class="t">${total === 0 ? "—" : total + " txs"}</div>` +
+      `<div class="s">${total === 0 ? "empty" : `${b.priv} priv, ${b.pq} pq`}</div>` +
+      starks;
+    row.appendChild(d);
+  });
+}
+
+// ---------------------------------------------------------------- ticker/stats
+function drawHud() {
+  const cfg = feed.cfg;
+  if (!cfg) return;
+  const inSlot = player.simT % cfg.slot_length;
+  $("tickfill").style.width = (100 * inSlot / cfg.slot_length).toFixed(1) + "%";
+  $("ticklabel").textContent =
+    `slot: ${Math.floor(player.simT / cfg.slot_length)}  ·  time: ${(inSlot / 1000).toFixed(1)} s`;
+  state.boundaryFlash = Math.max(0, state.boundaryFlash - 0.03);
+  $("ticker").classList.toggle("boundary", state.boundaryFlash > 0);
+
+  $("s_items").textContent = state.items.size;
+  $("s_pending").textContent = state.pending;
+  $("s_tpb").textContent = state.blocks.length ? (state.incSum / state.blocks.length).toFixed(1) : "–";
+  $("s_delay").textContent = state.delayMean == null ? "–" : state.delayMean.toFixed(2);
+  $("status").textContent =
+    `trace: ${feed.events.length} events · last poll ${feed.lastPoll}` +
+    (feed.stalled ? " · POLL FAILED (is `python -m http.server` running next to trace.jsonl?)" : "");
+}
+
+// ---------------------------------------------------------------- main loop
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(100, now - last);
+  last = now;
+  player.step(dt);
+  drawPool(); drawBlocks(); drawHud();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
