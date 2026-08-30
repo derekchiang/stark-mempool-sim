@@ -1,569 +1,3059 @@
-<!doctype html>
-<html lang="en">
-<head>
 <meta charset="utf-8">
-<title>STARK mempool sim — viewer</title>
+<title>EIP-8288 networked mempool — viewer</title>
 <style>
+  /* Both modes are selected, not flipped. Light is the v1 Matisse-pastel scheme;
+     dark is stepped for a dark surface. Both went through the dataviz skill's
+     validator rather than being eyeballed: light passes with a contrast WARN on
+     aqua and coral, whose required relief is the table view every panel carries;
+     dark passes clean. A guessed dark palette failed two hard gates, which is
+     why this one is not a lightness flip of the other. */
   :root {
-    /* Matisse-pastel scheme: warm cream paper, cobalt / leaf / coral marks */
+    color-scheme: light;
     --surface: #faf6ec; --panel: #f2ead8; --ink: #211d15; --ink2: #6b6150;
-    --grid: #e2d7bf; --priv: #2d73d8; --pq: #12a37e; --agg: #e5653a;
-    --flash: #d29413; --ghost: #c2b69f;
-    /* pastel washes, decorative chrome only (stat tiles) — never data encoding */
-    --wash-sky: #dde9f0; --wash-rose: #f2ddd3; --wash-sage: #e2ecd9; --wash-butter: #f5eac6;
-    /* per-aggregator identity colors (sprites + their arrows), deliberately a
-       separate family from the item colors; the set passes the all-pairs
-       colorblind-separation checks against surface --panel */
-    --aggregator0: #9c5ce4; --aggregator1: #d6408d; --aggregator2: #8d6d15;
-    --aggregator3: #4f4794; --aggregator4: #a01f2a;
+    --grid: #e2d7bf; --flash: #d29413; --ghost: #cec2aa;
+    --wash-a: #dde9f0; --wash-b: #f2ddd3; --wash-c: #e2ecd9; --wash-d: #f5eac6;
+    --s1: #2d73d8; --s2: #12a37e; --s3: #e5653a; --s4: #9c5ce4; --s5: #d6408d;
+    /* Knowledge classes: hue carries evidence status, lightness carries body,
+       settled is a neutral terminal grey. Deliberately not one sequential ramp --
+       these are capability predicates, not magnitudes of a single quantity, and a
+       ramp would imply a progression that flooding (which skips `requested`)
+       violates. */
+    --k-settled: #9a9384; --k-held-body: #12a37e; --k-held-nobody: #7fc9b0;
+    --k-body: #2d73d8; --k-verifying: #d29413; --k-requested: #e8c98a;
+    --k-none: #ded5c0;
+    /* The spread tree: green is a delivery that taught a node something, and
+       the shade is the form it took. Distinct from the class greens on the
+       nodes by being lines, not discs, and darker. */
+    --sp-object: #1b6f38; --sp-wrapper: #3d9a66; --sp-announce: #8ec9a5;
+    /* A delivery that taught the receiver nothing: the cost of the spread. */
+    --dup: #c0392b;
+    /* Sequential heat ramp for magnitudes, a pale tint as its zero so a node
+       at zero is still a node. One warm hue, light to dark. These were referenced by heatColour long before they
+       were defined, and an empty fillStyle is silently ignored by canvas -- so
+       every heat-coloured mark quietly stayed black. */
+    --heat0: #f3e4b4; --heat1: #e6ab2e; --heat2: #b2510f; --heat3: #3d1d06;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface: #14120f; --panel: #1c1a16; --ink: #f0ebe0; --ink2: #a49a86;
+      --grid: #33302a; --flash: #c98500; --ghost: #4a453a;
+      --wash-a: #1d2530; --wash-b: #2e2320; --wash-c: #1f2a22; --wash-d: #2c2718;
+      --s1: #3987e5; --s2: #199e70; --s3: #d95926; --s4: #9085e9; --s5: #d55181;
+      --k-settled: #6b6558; --k-held-body: #199e70; --k-held-nobody: #14634a;
+      --k-body: #3987e5; --k-verifying: #c98500; --k-requested: #7a5a17;
+      --k-none: #2a2721;
+      --sp-object: #6fe3a2; --sp-wrapper: #3fb375; --sp-announce: #2a6e49;
+      --dup: #ff7061;
+      /* Dark theme ramps dim to vivid, so "high" is what glows. */
+      --heat0: #3a2f12; --heat1: #8a5a12; --heat2: #d9962a; --heat3: #ffd97a;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface: #14120f; --panel: #1c1a16; --ink: #f0ebe0; --ink2: #a49a86;
+    --grid: #33302a; --flash: #c98500; --ghost: #4a453a;
+    --wash-a: #1d2530; --wash-b: #2e2320; --wash-c: #1f2a22; --wash-d: #2c2718;
+    --s1: #3987e5; --s2: #199e70; --s3: #d95926; --s4: #9085e9; --s5: #d55181;
+    --k-settled: #6b6558; --k-held-body: #199e70; --k-held-nobody: #14634a;
+    --k-body: #3987e5; --k-verifying: #c98500; --k-requested: #7a5a17;
+    --k-none: #2a2721;
+    --sp-object: #6fe3a2; --sp-wrapper: #3fb375; --sp-announce: #2a6e49;
+    --dup: #ff7061;
+    --heat0: #3a2f12; --heat1: #8a5a12; --heat2: #d9962a; --heat3: #ffd97a;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--surface); color: var(--ink);
-         font: 14px/1.45 system-ui, sans-serif; }
-  header { display: flex; align-items: baseline; gap: 14px; padding: 10px 16px 0; }
-  header h1 { font-family: Georgia, "Iowan Old Style", "Palatino Linotype",
-                           "Liberation Serif", serif;
-              font-size: 19px; font-weight: 600; letter-spacing: .01em; margin: 0; }
-  header .sub { color: var(--ink2); font-size: 12px; }
-  #infowrap { margin-left: auto; position: relative; }
-  #infopanel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10;
-               background: var(--panel); border: 1px solid var(--grid);
-               border-radius: 10px; padding: 8px 12px; width: max-content;
-               box-shadow: 0 4px 14px rgba(87, 61, 24, .14); font-size: 12px; }
-  #infopanel div { white-space: nowrap; padding: 1px 0; color: var(--ink2); }
-  #infopanel b { color: var(--ink); font-weight: 600; display: inline-block;
-                 min-width: 92px; }
-  #controls { display: flex; align-items: center; gap: 10px; padding: 8px 16px; flex-wrap: wrap; }
-  button { background: var(--panel); color: var(--ink); border: 1px solid var(--grid);
-           border-radius: 999px; padding: 4px 12px; font: inherit; cursor: pointer; }
-  button:hover { border-color: var(--ink2); }
-  button.on { background: var(--ink); color: var(--surface); }
-  #speedv { min-width: 44px; color: var(--ink2); font-variant-numeric: tabular-nums; }
-  #stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 4px 16px 8px; }
+         font: 13px/1.45 system-ui, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 10px 16px 0;
+           flex-wrap: wrap; }
+  header h1 { font-family: Georgia, "Iowan Old Style", Palatino, serif;
+              font-size: 18px; font-weight: 600; margin: 0; }
+  .sub { color: var(--ink2); font-size: 11px; }
+  #controls { display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+              flex-wrap: wrap; }
+  button, select { background: var(--panel); color: var(--ink);
+                   border: 1px solid var(--grid); border-radius: 999px;
+                   padding: 4px 11px; font: inherit; cursor: pointer; }
+  button:hover, select:hover { border-color: var(--ink2); }
+  label { color: var(--ink2); font-size: 11px; display: inline-flex;
+          align-items: center; gap: 5px; }
+  #tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+           gap: 8px; padding: 4px 16px 8px; }
   .tile { background: var(--panel); border-radius: 10px; padding: 6px 10px; }
-  .tile:nth-child(1) { background: var(--wash-sky); }
-  .tile:nth-child(2) { background: var(--wash-rose); }
-  .tile:nth-child(3) { background: var(--wash-sage); }
-  .tile:nth-child(4) { background: var(--wash-butter); }
-  .tile .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .tile .k { color: var(--ink2); font-size: 11px; }
-  #ticker { margin: 0 16px; height: 26px; background: var(--panel); border-radius: 13px;
-            position: relative; overflow: hidden; }
+  .tile:nth-child(1) { background: var(--wash-a); }
+  .tile:nth-child(2) { background: var(--wash-c); }
+  .tile:nth-child(3) { background: var(--wash-d); }
+  .tile:nth-child(4) { background: var(--wash-b); }
+  .tile .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile .k { color: var(--ink2); font-size: 10px; }
+  #ticker { margin: 0 16px; height: 24px; background: var(--panel);
+            border-radius: 12px; position: relative; overflow: hidden; }
   #tickfill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--grid); }
   #ticker.boundary #tickfill { background: var(--flash); }
   #ticklabel { position: absolute; inset: 0; display: flex; align-items: center;
-               justify-content: center; font-size: 12px; color: var(--ink); z-index: 1;
+               justify-content: center; font-size: 11px; z-index: 1;
                font-variant-numeric: tabular-nums; }
-  #main { padding: 10px 16px 16px; }
-  #poolwrap { background: var(--panel); border-radius: 10px; position: relative;
-              height: max(560px, calc(100vh - 340px)); }
-  #pool { width: 100%; height: 100%; display: block; }
-  #legend { position: absolute; right: 10px; top: 8px; font-size: 11px; color: var(--ink2);
-            display: flex; gap: 12px; }
-  #aggregator_header { position: absolute; left: 14px; top: 24px; z-index: 1; display: flex;
-                       align-items: center; gap: 5px; font-size: 10px; color: var(--ink2); }
-  #aggregator_header button { padding: 0 7px; font-size: 12px; line-height: 16px; }
-  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
-        margin-right: 4px; vertical-align: -1px; }
-  #status { padding: 0 16px 12px; color: var(--ink2); font-size: 11px; }
-  #blocks { margin: 8px 16px 0; }
-  #blkrow { display: flex; gap: 6px; justify-content: flex-end; overflow: hidden; }
+  #blocks { margin: 8px 16px 0; overflow-x: auto; }
+  #blkrow { display: flex; gap: 6px; justify-content: flex-end; min-width: min-content; }
   .blk { background: var(--panel); border: 1px solid var(--grid); border-radius: 8px;
-         padding: 4px 8px; min-width: 78px; text-align: center; flex: 0 0 auto; }
+         padding: 4px 8px; min-width: 88px; text-align: center; flex: 0 0 auto; }
   .blk .n { color: var(--ink2); font-size: 10px; }
-  .blk .t { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .blk .s { color: var(--ink2); font-size: 10px; }
-  .blk .s.c { max-width: 150px; margin: 0 auto; }
-  .blk.newest { border-color: var(--flash);
-                box-shadow: 0 0 0 2px color-mix(in srgb, var(--flash) 40%, transparent); }
-  .blk.empty .t { color: var(--ink2); }
+  .blk .t { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .blk .w { height: 3px; margin-top: 3px; border-radius: 2px; background: var(--grid); }
+  .blk .w i { display: block; height: 100%; border-radius: 2px; background: var(--s3); }
+  .blk.newest { border-color: var(--flash); }
+  .blk.settles { border-color: var(--s1); box-shadow: inset 0 0 0 1px var(--s1); }
+  #panels { padding: 10px 16px 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+          gap: 10px; }
+  /* The whole-network panels come first; the panels about one transaction or
+     one object follow under their own bar, which carries the selectors and
+     stays put while that section scrolls. */
+  #scopebar { position: sticky; top: 0; z-index: 2; background: var(--surface);
+              display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+              padding: 16px 0 8px; }
+  #scopebar .pnote { flex: 1 1 200px; }
+  /* The last few followed transactions, so the follow mode's switching is
+     something the eye saw coming rather than a panel that changed. */
+  #txticker { flex: 1 1 100%; display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { font-size: 10px; border: 1px solid var(--grid); border-radius: 999px;
+          padding: 1px 8px; cursor: pointer; color: var(--ink2);
+          font-variant-numeric: tabular-nums; }
+  .chip.on { border-color: var(--ink2); background: var(--wash-a); color: var(--ink); }
+  /* An author `display` beats the UA stylesheet's `[hidden] { display: none }`,
+     so without this the tab switch showed the network *below* the panels rather
+     than instead of them -- which reads as the button doing nothing. */
+  #panels[hidden], #network[hidden], #netbar[hidden] { display: none; }
+  .panel { background: var(--panel); border-radius: 10px; padding: 8px 10px 10px;
+           min-width: 0; }
+  /* The panels that carry the argument get the height and a grid of their
+     own, two abreast on a wide window and stacked on a narrow one. Everything
+     else is a diagnostic and stays small. */
+  .grid.wide { grid-template-columns: repeat(auto-fit, minmax(560px, 1fr));
+               margin-bottom: 10px; }
+  .panel.feature .plot { height: 320px; }
+  .panel.feature .ptitle { font-size: 13px; }
+  .panel.feature .tbl { max-height: 320px; }
+  .phead { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .ptitle { font-weight: 600; font-size: 12px; }
+  .pnote { color: var(--ink2); font-size: 10px; flex: 1 1 120px; }
+  .pnote.warn { color: var(--s3); }
+  .plot { position: relative; height: 190px; }
+  .plot canvas { width: 100%; height: 100%; display: block; }
+  .tip { position: absolute; pointer-events: none; background: var(--surface);
+         border: 1px solid var(--grid); border-radius: 6px; padding: 3px 7px;
+         font-size: 10px; line-height: 1.35; white-space: nowrap; z-index: 3;
+         color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,.12);
+         font-variant-numeric: tabular-nums; }
+  .tip[hidden] { display: none; }
+  /* The pinned node's stats sit in a fixed corner rather than under the
+     cursor: pinning exists so the numbers hold still while the eye compares. */
+  #netpin { left: 10px; top: 10px; }
+  .legend { display: flex; gap: 9px; flex-wrap: wrap; font-size: 10px;
+            color: var(--ink2); margin-top: 3px; }
+  .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+        margin-right: 3px; vertical-align: -1px; }
+  .tbl { max-height: 190px; overflow: auto; font-size: 10px; }
+  .tbl table { border-collapse: collapse; width: 100%; }
+  .tbl th, .tbl td { text-align: right; padding: 1px 5px; white-space: nowrap;
+                     font-variant-numeric: tabular-nums; }
+  .tbl th { position: sticky; top: 0; background: var(--panel); color: var(--ink2);
+            font-weight: 600; }
+  .tbl td:first-child, .tbl th:first-child { text-align: left; }
+  #status { padding: 0 16px 16px; color: var(--ink2); font-size: 10px; }
+  .tabs { margin-left: auto; display: inline-flex; gap: 4px; }
+  .tog.on { border-color: var(--ink2); background: var(--wash-a); }
+  #netbar { display: flex; align-items: center; gap: 12px; padding: 4px 16px 2px;
+            flex-wrap: wrap; }
+  #netnote { padding: 0 16px 4px; }
+  #network { padding: 6px 16px 20px; }
+  #network .plot { height: 66vh; min-height: 420px; background: var(--panel);
+                   border-radius: 10px; }
+  .tog { font-size: 10px; padding: 2px 8px; }
+  .step { padding: 2px 6px; margin: 0 2px; }
+  .slots { width: 3.2em; background: var(--panel); color: var(--ink);
+           border: 1px solid var(--grid); border-radius: 6px; padding: 2px 4px;
+           font: inherit; font-size: 11px; }
+  .pdesc { color: var(--ink2); font-size: 11px; line-height: 1.4;
+           margin: 4px 0 6px; max-width: 90ch; }
 </style>
-</head>
-<body>
+
 <header>
-  <h1>EIP-8288 STARK mempool — viewer</h1>
+  <h1>EIP-8288 networked mempool</h1>
   <div class="sub" id="cfgline">waiting for trace.jsonl …</div>
-  <div id="infowrap">
-    <button id="info">ⓘ info</button>
-    <div id="infopanel" hidden>
-      <div><b>r</b> fold time, ms — one 2-to-1 fold</div>
-      <div><b>l</b> link latency, ms</div>
-      <div><b>N</b> number of aggregators</div>
-      <div><b>B</b> builder folds per slot — up to B+1 items into the block's final STARK</div>
-      <div><b>lambda_priv</b> privacy txs per second — one raw STARK each</div>
-      <div><b>lambda_pq</b> PQ txs per second — sig only (needs to get aggregated)</div>
-      <div><b>slot_length</b> slot length, ms — block built at each boundary</div>
-      <div><b>slots_n</b> run length, slots</div>
-    </div>
-  </div>
 </header>
 
 <div id="controls">
   <button id="play">⏸ pause</button>
   <button id="restart">↺ replay</button>
-  <label style="color:var(--ink2);font-size:12px">speed
-    <input id="speed" type="range" min="0" max="11" step="1" value="4">
-  </label>
-  <span id="speedv">1×</span>
+  <label>speed <input id="speed" type="range" min="0" max="11" step="1" value="4">
+    <span id="speedv">1×</span></label>
+  <button id="theme" class="tog">◐ theme</button>
+  <span class="tabs"><button id="tab-charts" class="tog on">charts</button
+    ><button id="tab-network" class="tog">network</button
+    ><button id="tab-transaction" class="tog">transaction</button></span>
 </div>
 
-<div id="stats">
-  <div class="tile"><div class="v" id="s_items">–</div><div class="k">pool items</div></div>
-  <div class="tile"><div class="v" id="s_pending">–</div><div class="k">pending txs</div></div>
-  <div class="tile"><div class="v" id="s_tpb">–</div><div class="k">average txs per block</div></div>
-  <div class="tile"><div class="v" id="s_delay">–</div><div class="k">mean delay (slots)</div></div>
+<div id="netbar" hidden>
+  <label>colour by <select id="netmetric"></select></label>
+  <label>size by <select id="netsize">
+    <option value="held">view size</option>
+    <option value="eqb">buffered bytes</option>
+    <option value="uniform">uniform</option>
+  </select></label>
+  <label>layout <select id="netlayout"></select></label>
+  <label>scale <select id="netscale">
+    <option value="ceiling">fixed ceiling</option>
+    <option value="present">highest present</option>
+  </select></label>
+  <label><input type="checkbox" id="showdups" checked> duplicates</label>
+  <label>from node <select id="netref"></select></label>
+  <label>follow <select id="netfollow">
+      <option value="auto">auto</option>
+      <option value="pinned">pinned</option>
+    </select> up to <input id="netslots" type="number" min="1" max="99" value="3"
+      class="slots"> slots</label>
+  <label>followed tx <button class="tog step" id="netfollowed-prev">‹</button
+    ><select id="netfollowed"></select
+    ><button class="tog step" id="netfollowed-next">›</button></label>
 </div>
+<div class="sub" id="netnote" hidden></div>
 
+<div id="tiles"></div>
 <div id="ticker"><div id="tickfill"></div><div id="ticklabel">slot –</div></div>
-
-<div id="blocks">
-  <div id="blkrow"></div>
-</div>
-
-<div id="main">
-  <div id="poolwrap">
-    <canvas id="pool"></canvas>
-    <div id="aggregator_header">aggregators
-      <button id="fewer_aggregators">−</button><button id="more_aggregators">+</button>
-    </div>
-    <div id="legend">
-      <span><span class="sw" style="background:var(--priv)"></span>Privacy app</span>
-      <span><span class="sw" style="background:var(--pq)"></span>PQ tx</span>
-      <span><span class="sw" style="background:var(--agg)"></span>Aggregate STARK</span>
-      <span><span class="sw" style="box-sizing:border-box;border:1.5px solid var(--agg);background:linear-gradient(to top,var(--agg) 55%,transparent 55%)"></span>fill = txs still pending; hollow = already included</span>
-    </div>
+<div id="blocks"><div id="blkrow"></div></div>
+<div id="panels">
+  <div class="grid wide" id="panels-sim-wide"></div>
+  <div class="grid" id="panels-sim"></div>
+  <div id="scopebar">
+    <span class="ptitle">one transaction, one object</span>
+    <label>follow <select id="follow">
+      <option value="auto">auto</option>
+      <option value="pinned">pinned</option>
+    </select> up to <input id="slots" type="number" min="1" max="99" value="3"
+      class="slots"> slots</label>
+    <label>followed tx <button class="tog step" id="followed-prev">‹</button
+      ><select id="followed"></select
+      ><button class="tog step" id="followed-next">›</button></label>
+    <label>object <button class="tog step" id="object-prev">‹</button
+      ><select id="object"></select
+      ><button class="tog step" id="object-next">›</button></label>
+    <span class="pnote" id="scopenote"></span>
+    <div id="txticker"></div>
   </div>
+  <div class="grid wide" id="panels-scoped-wide"></div>
+  <div class="grid" id="panels-scoped"></div>
 </div>
-<div id="status">polling trace.jsonl …</div>
+<div id="network" hidden>
+  <div class="plot" id="netplot"><canvas id="netcv"></canvas>
+    <div class="tip" id="nettip" hidden></div>
+    <div class="tip" id="netpin" hidden></div></div>
+  <div class="legend" id="netlegend"></div>
+</div>
+<div id="status">idle</div>
 
 <script>
 "use strict";
-// ---------------------------------------------------------------- trace feed
-const feed = {
-  events: [], tail: "", bytes: 0, cfg: null, lastPoll: "-", stalled: false,
-  async poll() {
-    try {
-      const resp = await fetch("trace.jsonl", { cache: "no-store" });
-      if (!resp.ok) throw new Error(resp.status);
-      const text = await resp.text();
-      if (text.length < this.bytes) { this.reset(); }        // new file
-      const fresh = text.slice(this.bytes - this.tail.length);
-      this.bytes = text.length;
-      const lines = (this.tail + fresh).split("\n");
-      this.tail = lines.pop();
-      for (const ln of lines) {
-        if (!ln.trim()) continue;
-        const e = JSON.parse(ln);
-        if (e.e === "cfg") {
-          e.slot_length ??= e.slot_ms; e.slots_n ??= e.slots;   // older trace keys
-          this.cfg = e; onCfg(e);
-        } else this.events.push(e);
-      }
-      this.stalled = false;
-    } catch (err) { this.stalled = true; }
-    this.lastPoll = new Date().toLocaleTimeString();
-  },
-  reset() { this.events = []; this.tail = ""; this.bytes = 0; player.hardReset(); }
-};
-setInterval(() => feed.poll(), 1000);
-feed.poll();
+/* The trace is the record, and everything here is a reduction of it. The
+   simulator owns semantics -- which knowledge class a node is in, which objects
+   left a view -- and this file only ever counts and bins what the trace states. A
+   second path computing the same quantity differently could drift from it, and
+   drift between a summary and its source has cost this project more than once. */
 
-// ---------------------------------------------------------------- sim state
-const state = {
-  items: new Map(),        // id -> {id,size,bornSize,tot,depth,kind,locked,x,y,tx,ty}
-  folds: [],               // agg id -> {a,b,as,bs,start,end} | null
-  blocks: [],              // {slot, priv, pq, item}
-  pending: 0, incSum: 0, delayMean: null,
-  lastInc: null, boundaryFlash: 0,
-};
-function resetState() {
-  state.items.clear();
-  state.folds = feed.cfg ? Array.from({ length: feed.cfg.n }, () => null) : [];
-  state.blocks = [];
-  state.pending = 0; state.incSum = 0;
-  state.delayMean = null; state.lastInc = null; state.boundaryFlash = 0;
-}
-function applyEvent(e) {
-  const items = state.items;
-  if (e.e === "arr") {
-    let it = items.get(e.item);
-    if (!it) { it = { id: e.item, kind: e.kind, depth: 0, locked: false }; items.set(e.item, it); }
-    it.size = e.size; it.bornSize = e.size; it.tot = e.size;
-    state.pending += 1;
-  } else if (e.e === "fs") {
-    const a = items.get(e.a), b = items.get(e.b);
-    if (a) a.locked = true;
-    if (b) b.locked = true;
-    state.folds[e.agg] = { a: e.a, b: e.b, as: e.as, bs: e.bs, start: e.t, end: e.t + (e.d ?? feed.cfg.r) };
-  } else if (e.e === "fd") {
-    // the fresh aggregate is born at its aggregator's sprite; undrawn
-    // aggregators (and pre-layout folds) fall back to the parents' midpoint
-    const sprite = spriteCenters[e.agg];
-    const old = [items.get(e.a), items.get(e.b)].filter(o => o && o.x !== undefined);
-    const x = sprite ? sprite.x : (old.length ? old.reduce((s, o) => s + o.x, 0) / old.length : undefined);
-    const y = sprite ? sprite.y : (old.length ? old.reduce((s, o) => s + o.y, 0) / old.length : undefined);
-    items.delete(e.a); items.delete(e.b);
-    items.set(e.item, { id: e.item, kind: "agg", size: e.size, bornSize: e.size,
-                        tot: e.tot, depth: e.depth, locked: false, x, y });
-    state.folds[e.agg] = null;
-  } else if (e.e === "inc") {
-    const kinds = [];
-    for (const id of e.items) {
-      const it = items.get(id);
-      if (it) {
-        kinds.push({ id, kind: it.kind, n: it.size });
-        it.size = 0;
+const $ = id => document.getElementById(id);
+const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
+const css = name => getComputedStyle(document.documentElement)
+  .getPropertyValue(name).trim();
+
+/* --------------------------------------------------------------- the feed ---
+   Incremental by byte offset, via Range. Three response cases, and mixing them
+   up corrupts the replay: 206 appends the fragment; 200 is a whole-file snapshot
+   of which only the bytes past the confirmed offset are new -- and that is the
+   *default* path, because the stdlib server ignores Range entirely; 416 means
+   the file shrank, i.e. was replaced by a new run.
+
+   The range starts one byte *before* the confirmed offset. Asking from the
+   offset itself made every idle poll a 416 -- the correct HTTP answer for
+   "nothing new", but one the browser logs as a console error, so a healthy
+   quiet second was indistinguishable in the console from a broken page. With
+   the sentinel byte an unchanged file answers 206 of length one, and 416 is
+   left meaning only what a reader cannot ignore.
+
+   Offsets are bytes. The previous viewer tracked String.length, which counts
+   UTF-16 code units -- self-consistent only because it always fetched the whole
+   body, and silently wrong the moment ranges arrive. */
+const feed = {
+  offset: 0, tail: new Uint8Array(0), events: [], cfg: null, tag: null,
+  lastPoll: "–", note: "starting", polling: false, ranged: false,
+  decoder: new TextDecoder(),
+
+  reset() {
+    this.offset = 0; this.tail = new Uint8Array(0); this.events = [];
+    this.cfg = null; this.tag = null; player.hardReset();
+  },
+
+  /* Size alone cannot detect replacement: a run truncated and regrown past this
+     offset between two polls, or replaced by a same-length file, would be
+     spliced onto the previous one and read as a single impossible run. The
+     validator catches it. Without one -- the stdlib server sends none -- this is
+     best-effort, which is why the status line reports which server it is
+     talking to. */
+  checkIdentity(resp) {
+    const tag = resp.headers.get("ETag");
+    if (!tag) return true;
+    if (this.tag === null) { this.tag = tag; return true; }
+    if (this.tag === tag) return true;
+    this.tag = tag;
+    this.reset();
+    return false;
+  },
+
+  async poll() {
+    if (this.polling) return;
+    this.polling = true;
+    try {
+      const headers = this.offset > 0
+        ? { Range: "bytes=" + (this.offset - 1) + "-" } : {};
+      const resp = await fetch("trace.jsonl", { headers, cache: "no-store" });
+      if (resp.status === 416) {
+        // Only reachable when the file is shorter than offset-1: replaced by
+        // a smaller run. "Nothing new" answers 206 of length one instead.
+        const total = this.totalFrom(resp);
+        if (total !== null && total < this.offset) this.reset();
+        else this.checkIdentity(resp);
+        this.note = "trace shrank (416)";
+      } else if (resp.status === 206) {
+        const body = new Uint8Array(await resp.arrayBuffer());
+        this.ranged = true;
+        if (this.checkIdentity(resp)) {
+          // The first byte is the sentinel already consumed last time.
+          const fresh = body.subarray(1);
+          this.consume(fresh, this.offset + fresh.length);
+          this.note = fresh.length ? "incremental (206)" : "up to date (206)";
+        } else {
+          this.note = "trace replaced — restarted";
+        }
+      } else if (resp.ok) {
+        const whole = new Uint8Array(await resp.arrayBuffer());
+        if (whole.length < this.offset) this.reset();
+        this.checkIdentity(resp);
+        const fresh = whole.subarray(Math.min(this.offset, whole.length));
+        this.consume(fresh, whole.length);
+        this.note = this.offset > 0 && !this.ranged
+          ? "whole file each poll — no Range support; run serve.py for incremental"
+          : "whole file (200)";
       } else {
-        kinds.push({ id, kind: "agg", n: null });
+        this.note = "HTTP " + resp.status;
       }
+    } catch (err) {
+      this.note = "poll failed — is a server running in this directory?";
     }
-    state.pending -= e.txs;
-    state.lastInc = { t: e.t, parts: kinds, txs: e.txs, folds: e.folds };
-  } else if (e.e === "upd") {
-    // ghost decay: the block ghosted txs inside objects it did not pick
-    for (const id in e.sizes) {
-      const it = items.get(+id);
-      if (it) it.size = e.sizes[id];
+    this.lastPoll = new Date().toLocaleTimeString();
+    this.polling = false;
+  },
+
+  totalFrom(resp) {
+    const match = (resp.headers.get("Content-Range") || "").match(/\/(\d+)\s*$/);
+    return match ? parseInt(match[1], 10) : null;
+  },
+
+  /* Bytes in, whole JSONL records out. The incomplete final record is kept as
+     *bytes*: a multi-byte sequence can straddle a chunk boundary, and decoding
+     half of one yields a replacement character that never becomes valid again. */
+  consume(chunk, newOffset) {
+    const joined = new Uint8Array(this.tail.length + chunk.length);
+    joined.set(this.tail, 0);
+    joined.set(chunk, this.tail.length);
+    let start = 0;
+    for (let i = 0; i < joined.length; i++) {
+      if (joined[i] !== 10) continue;
+      const line = this.decoder.decode(joined.subarray(start, i));
+      start = i + 1;
+      if (!line.trim()) continue;
+      let event;
+      try { event = JSON.parse(line); } catch (err) { continue; }
+      if (event.e === "cfg") { this.cfg = event; onCfg(event); }
+      else this.events.push(event);
     }
-  } else if (e.e === "dead") {
-    // discarded: covers no pending txs any more -- gone from every view
-    for (const id of e.items) items.delete(id);
-  } else if (e.e === "slot") {
-    state.pending = e.pending;
-    state.incSum += e.inc_priv + e.inc_pq; state.delayMean = e.delay_mean;
-    state.boundaryFlash = 1;
-    const picked = state.lastInc && state.lastInc.t === e.t ? state.lastInc : null;
-    state.blocks.push({ slot: e.slot, priv: e.inc_priv, pq: e.inc_pq,
-                        parts: picked ? picked.parts : null,
-                        folds: picked ? picked.folds : 0 });
+    this.tail = joined.slice(start);
+    this.offset = newOffset;
+  },
+};
+
+/* -------------------------------------------------------------- the state --- */
+function emptyState() {
+  return {
+    nodeCount: 0, tracedNodes: new Set(), observedThrough: 0,
+    objects: new Map(),
+    knowledge: new Map(), knowledgeBins: new Map(),
+    /* Per followed transaction, per node, its class transitions in order:
+       what the timeline layouts draw as a bar. Bounded by the knw records,
+       which are already kept as the bins. */
+    classHistory: new Map(),
+    /* Per followed transaction, each node's first transition into knowing
+       it: who delivered the evidence and in which form, or null when nobody
+       did -- the entry at birth, the proposer at its block. The first one
+       only: a node that forgets and is told again did not learn it then. */
+    spread: new Map(),
+    /* Per followed transaction, every delivery that taught a node nothing:
+       peer, node, time, kind and bytes. What the spread cost. */
+    dups: new Map(),
+    boundaries: new Map(), prevCounters: new Map(),
+    dispersion: [], bytes: [], kinds: new Set(),
+    blocks: [], included: 0, wrappers: 0,
+    /* First `settled` transition per followed transaction. The proposer marks
+       what it included at the block's own time, so with every node traced
+       this is the inclusion time, not a later notice of it. */
+    settledAt: new Map(),
+    /* Birth time per transaction, from `arr`: what the follow modes order
+       by, and the origin of the knowledge panel's clock. */
+    txBorn: new Map(),
+    /* Recent admissions, for the network view's ripples. Bounded at the
+       producer, because the consumer only draws while its tab is visible and
+       an unpruned list would grow for the whole replay. Ordered by t, since
+       events apply in order. */
+    netFlashes: [],
+    /* Latest reduced values per node, for the network view. Kept as one record
+       per node rather than a history: this is a "right now" picture, and holding
+       a series per node is the memory shape that does not scale. */
+    nodeState: new Map(),
+    drops: { total: 0, bytes: 0, byReason: {}, byNode: {}, recent: [] },
+    staleAvailable: false, staleMax: 0,
+    segments: [], finished: null, boundaryFlash: 0,
+  };
+}
+let state = emptyState();
+
+function objectRecord(id, born, tx) {
+  let record = state.objects.get(id);
+  if (!record) {
+    record = { id: id, born: born, tx: tx, entry: null,
+               reach: new Set(), resident: new Set(), bins: [], byHop: [] };
+    state.objects.set(id, record);
+  }
+  return record;
+}
+
+function sampleObject(record, now) {
+  const age = now - record.born;
+  const last = record.bins[record.bins.length - 1];
+  if (last && age - last.age < 15) {
+    last.reach = record.reach.size;
+    last.res = record.resident.size;
+    last.hops = record.byHop.slice();
+    return;
+  }
+  record.bins.push({ age: age, reach: record.reach.size,
+                     res: record.resident.size, hops: record.byHop.slice() });
+}
+
+/* Ripple lifetimes are *simulated* milliseconds, not wall ones: pausing
+   freezes the ripples with everything else, and speeding the replay up speeds
+   them up, so the animation is a property of the run rather than of watching
+   it. 600 ms is under an aggregation interval, so waves from consecutive
+   ticks stay distinguishable. */
+const NET_FLASH_MS = 600;
+const NET_FLASH_KEEP = 600;
+
+function netFlash(event) {
+  state.netFlashes.push({ node: event.n, t: event.t });
+  if (state.netFlashes.length > NET_FLASH_KEEP) {
+    state.netFlashes.splice(0, state.netFlashes.length - NET_FLASH_KEEP);
   }
 }
 
-// ---------------------------------------------------------------- player
-const player = {
-  simT: 0, cursor: 0, playing: true, speed: 1,
-  hardReset() { this.simT = 0; this.cursor = 0; resetState(); },
-  step(dtMs) {
-    if (this.playing) {
-      this.simT += dtMs * this.speed;
+function applyEvent(event) {
+  const now = event.t || 0;
+  if (now > state.observedThrough) state.observedThrough = now;
+  if (event.n !== undefined) state.tracedNodes.add(event.n);
+  switch (event.e) {
+    case "arr": {
+      const record = objectRecord(event.o, event.t, event.tx);
+      state.txBorn.set(event.tx, event.t);
+      record.entry = event.n;
+      record.reach.add(event.n);
+      record.resident.add(event.n);
+      hopShift(record, event.n, 1);
+      sampleObject(record, now);
+      netFlash(event);
+      break;
     }
-    while (this.cursor < feed.events.length && feed.events[this.cursor].t <= this.simT) {
+    case "adm": {
+      // The ripple fires for every admission, wrapper or not: aggregation
+      // spreading is network activity as much as flooding is. The reach
+      // accounting below is what must exclude proofs, not the animation.
+      netFlash(event);
+      /* `via` marks the admission of a *proof*, whose object id is an
+         aggregate's and not any transaction it covers. Counting those would
+         inflate an object's reach with events about something else.
+
+         Defensive rather than load-bearing today, and deliberately kept:
+         records are created only from `arr`, aggregates never get one, so the
+         lookup below already misses. Mutation testing confirmed no assertion
+         forces this line. It exists so that a later change which creates records
+         from `adm` does not silently begin counting proof admissions as
+         transaction reach. */
+      if (event.via) break;
+      const record = state.objects.get(event.o);
+      if (!record) break;
+      record.reach.add(event.n);
+      if (!record.resident.has(event.n)) {
+        record.resident.add(event.n);
+        hopShift(record, event.n, 1);
+      }
+      sampleObject(record, now);
+      break;
+    }
+    case "drop": {
+      for (const id of event.o) {
+        const record = state.objects.get(id);
+        if (!record) continue;
+        if (record.resident.delete(event.n)) hopShift(record, event.n, -1);
+        sampleObject(record, now);
+      }
+      break;
+    }
+    case "knw": {
+      let byNode = state.knowledge.get(event.tx);
+      if (!byNode) { byNode = new Map(); state.knowledge.set(event.tx, byNode); }
+      byNode.set(event.n, event.to);
+      let history = state.classHistory.get(event.tx);
+      if (!history) { history = new Map(); state.classHistory.set(event.tx, history); }
+      if (!history.has(event.n)) history.set(event.n, []);
+      history.get(event.n).push([now, event.to]);
+      if (event.to === "settled" && !state.settledAt.has(event.tx))
+        state.settledAt.set(event.tx, now);
+      if (event.to !== "none") {
+        let tree = state.spread.get(event.tx);
+        if (!tree) { tree = new Map(); state.spread.set(event.tx, tree); }
+        if (!tree.has(event.n)) {
+          const own = state.objects.get(event.o);
+          tree.set(event.n, event.peer === undefined ? null : {
+            peer: event.peer, o: event.o, t: now,
+            form: event.to === "settled" ? "block"
+                : event.to === "requested" ? "announce"
+                : (own && own.tx === event.tx) ? "object" : "wrapper",
+          });
+        }
+      }
+      const counts = {};
+      let accounted = 0;
+      for (const klass of byNode.values()) {
+        counts[klass] = (counts[klass] || 0) + 1;
+        accounted += 1;
+      }
+      /* Nodes that have never transitioned are in `none` and emit nothing, so
+         the remainder is inferred to keep the stack summing to N -- which is the
+         property that makes a stacked area an honest partition. */
+      const nodes = state.nodeCount || state.tracedNodes.size || 1;
+      counts.none = (counts.none || 0) + Math.max(0, nodes - accounted);
+      let series = state.knowledgeBins.get(event.tx);
+      if (!series) { series = []; state.knowledgeBins.set(event.tx, series); }
+      series.push({ t: now, counts: counts });
+      break;
+    }
+    case "cnt": {
+      let group = state.boundaries.get(event.t);
+      if (!group) { group = new Map(); state.boundaries.set(event.t, group); }
+      group.set(event.n, event);
+      if (event.stale >= 0) {
+        state.staleAvailable = true;
+        if (event.stale > state.staleMax) state.staleMax = event.stale;
+      }
+      for (const key in (event.obk || {})) state.kinds.add(key);
+      maybePublishBoundary(event.t);
+      break;
+    }
+    case "drp": {
+      /* A drop is a loss, not traffic. Counted by reason because the reasons
+         mean different things: a full send buffer means bytes never left, while
+         a refused verification means they arrived, were paid for, and then made
+         no difference. */
+      state.drops.total += 1;
+      state.drops.bytes += event.b || 0;
+      const why = event.why || "unknown";
+      state.drops.byReason[why] = (state.drops.byReason[why] || 0) + 1;
+      state.drops.byNode[event.n] = (state.drops.byNode[event.n] || 0) + 1;
+      state.drops.recent.push({ t: now, why: why, n: event.n, b: event.b || 0 });
+      if (state.drops.recent.length > 4000) state.drops.recent.shift();
+      break;
+    }
+    case "dup":
+      for (const tx of event.txs) {
+        let list = state.dups.get(tx);
+        if (!list) { list = []; state.dups.set(tx, list); }
+        list.push({ t: now, peer: event.peer, n: event.n, k: event.k, b: event.b });
+      }
+      break;
+    case "wrp": state.wrappers += 1; break;
+    case "blk":
+      state.included += event.txs;
+      state.blocks.push({ t: now, slot: event.slot, proposer: event.proposer,
+                          txs: event.txs, objs: event.objs,
+                          wasted: event.wasted });
+      state.boundaryFlash = 1;
+      break;
+    case "seg":
+      state.segments.push({ start: event.start, end: event.t, why: event.why });
+      break;
+    case "end":
+      state.finished = event.status;
+      break;
+  }
+}
+
+function expectedNodes() {
+  const cfg = feed.cfg;
+  if (cfg && Array.isArray(cfg.trace_focus)) return cfg.trace_focus.length;
+  return state.nodeCount || state.tracedNodes.size;
+}
+
+function quantiles(values) {
+  if (!values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const at = f => sorted[Math.min(sorted.length - 1,
+    Math.max(0, Math.round(f * (sorted.length - 1))))];
+  return { min: sorted[0], p05: at(0.05), med: at(0.5), p95: at(0.95),
+           max: sorted[sorted.length - 1] };
+}
+
+/* A dispersion point needs every traced node's sample for that instant.
+   Publishing a partial boundary would report a quantile over whoever happened to
+   have been read so far -- a different statistic that looks identical. */
+function maybePublishBoundary(t) {
+  const group = state.boundaries.get(t);
+  const expected = expectedNodes();
+  if (!expected || group.size < expected) return;
+  /* Utilisation is a per-node difference of cumulative counters, and the
+     difference of two p95s is not the p95 of the differences. Each node is
+     differenced against its own previous sample first; only then reduced. */
+  const previousByNode = new Map();
+  for (const entry of group) {
+    const existing = state.prevCounters.get(entry[0]);
+    if (existing) previousByNode.set(entry[0], existing);
+  }
+  const egress = [], cpu = [], eq = [], cq = [], held = [], stale = [];
+  const eqb = [], drops = [];
+  const obk = {}, sbk = {}, ibk = {};
+  let idb = 0, droppedTotal = 0, droppedBytes = 0;
+  for (const entry of group) {
+    const node = entry[0], record = entry[1];
+    const previous = state.prevCounters.get(node);
+    if (previous) {
+      const dt = record.t - previous.t;
+      if (dt > 0) {
+        egress.push(clamp01((record.eb - previous.eb) / dt));
+        cpu.push(clamp01((record.cb - previous.cb) / dt));
+      }
+    }
+    state.prevCounters.set(node, record);
+    eq.push(record.eq); cq.push(record.cq); held.push(record.held);
+    /* Queued *bytes* as well as messages: the bound is in bytes, and a depth in
+       messages cannot say how full a send buffer is -- one 256 kB proof and one
+       32-byte announcement both read as "1". */
+    if (record.eqb !== undefined) eqb.push(record.eqb);
+    if (record.dr !== undefined) {
+      drops.push(record.dr);
+      droppedTotal += record.dr;
+      droppedBytes += record.drb || 0;
+    }
+    if (record.stale >= 0) stale.push(record.stale);
+    for (const kind in (record.obk || {})) obk[kind] = (obk[kind] || 0) + record.obk[kind];
+    for (const kind in (record.sbk || {})) sbk[kind] = (sbk[kind] || 0) + record.sbk[kind];
+    for (const kind in (record.ibk || {})) ibk[kind] = (ibk[kind] || 0) + record.ibk[kind];
+    idb += record.idb || 0;
+  }
+  /* Per node, alongside the quantiles. Utilisation has to be differenced per
+     node before it means anything, and that difference is computed here already
+     -- so it is recorded here rather than recomputed somewhere it could drift. */
+  for (const entry of group) {
+    const node = entry[0], record = entry[1];
+    const before = previousByNode.get(node);
+    let egressUse = null, cpuUse = null;
+    if (before) {
+      const dt = record.t - before.t;
+      if (dt > 0) {
+        egressUse = clamp01((record.eb - before.eb) / dt);
+        cpuUse = clamp01((record.cb - before.cb) / dt);
+      }
+    }
+    state.nodeState.set(node, {
+      t: record.t, egress: egressUse, cpu: cpuUse,
+      eqb: record.eqb === undefined ? null : record.eqb,
+      eq: record.eq, cq: record.cq, held: record.held,
+      dr: record.dr || 0, drb: record.drb || 0,
+      stale: record.stale >= 0 ? record.stale : null,
+    });
+  }
+  state.dispersion.push({
+    t: t, egress: quantiles(egress), cpu: quantiles(cpu),
+    eq: quantiles(eq), cq: quantiles(cq), held: quantiles(held),
+    eqb: eqb.length ? quantiles(eqb) : null,
+    drops: drops.length ? quantiles(drops) : null,
+    droppedTotal: droppedTotal, droppedBytes: droppedBytes,
+    stale: stale.length ? quantiles(stale) : null,
+  });
+  state.bytes.push({ t: t, obk: obk, sbk: sbk, ibk: ibk, idb: idb });
+  state.boundaries.delete(t);
+}
+
+/* ------------------------------------------------------------- the player --- */
+const player = {
+  // 1x by default: the trace is a recording of time, and the honest first
+  // impression is the one that unfolds at the speed it happened.
+  simT: 0, cursor: 0, playing: true, speed: 1,
+  hardReset() { this.simT = 0; this.cursor = 0; state = emptyState(); primeCfg(); },
+  step(dtMs) {
+    if (this.playing) this.simT += dtMs * this.speed;
+    while (this.cursor < feed.events.length &&
+           (feed.events[this.cursor].t || 0) <= this.simT) {
       applyEvent(feed.events[this.cursor++]);
     }
   },
 };
 
-// ---------------------------------------------------------------- controls
-const $ = id => document.getElementById(id);
-function onCfg(cfg) {
-  $("cfgline").textContent =
-    `r=${cfg.r}${cfg.r_jitter ? `+U(0,${Math.round(cfg.r_jitter * 100)}%)` : ""} ms, ` +
-    `l=${cfg.l} ms, N=${cfg.n}, B=${cfg.b} builder folds, ` +
-    `lambda_priv=${cfg.lam_priv} tx/s, lambda_pq=${cfg.lam_pq} tx/s, ` +
-    `slot_length=${cfg.slot_length} ms, slots_n=${cfg.slots_n}, seed ${cfg.seed}`;
-  resetState();
+function primeCfg() {
+  if (feed.cfg) state.nodeCount = feed.cfg.nodes;
 }
-$("play").onclick = () => {
+
+function onCfg(cfg) {
+  player.hardReset();
+  const focus = Array.isArray(cfg.trace_focus)
+    ? "focus " + cfg.trace_focus.join(",") : "all nodes";
+  const topo = cfg.topology === "omitted" ? "topology omitted"
+    : cfg.topology.length + " edges";
+  $("cfgline").textContent =
+    "schema " + cfg.trace_schema + " · N=" + cfg.nodes + " d=" + cfg.degree +
+    " · l=" + cfg.latency_base + "ms · relay=" + cfg.relay_policy +
+    " · notify=" + cfg.chain_notify + " · proposer=" + cfg.proposer_mode +
+    " · plan=" + cfg.fold_plan + " · tick=" + cfg.aggregation_interval + "ms" +
+    " · slot=" + cfg.slot_length + "ms · " + focus +
+    " · sample 1/" + cfg.trace_sample +
+    " · counters every " + cfg.trace_counter_interval + "ms · " + topo +
+    " · seed " + cfg.seed;
+}
+
+/* ----------------------------------------------------------- chart helpers --- */
+function surface(canvas) {
+  const wrap = canvas.parentElement;
+  const w = wrap.clientWidth, h = wrap.clientHeight, dpr = devicePixelRatio || 1;
+  if (canvas.width !== Math.round(w * dpr)) canvas.width = Math.round(w * dpr);
+  if (canvas.height !== Math.round(h * dpr)) canvas.height = Math.round(h * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx: ctx, w: w, h: h, pad: { l: 40, r: 10, t: 14, b: 18 } };
+}
+
+function axes(g, yTop, label) {
+  const ctx = g.ctx, pad = g.pad;
+  ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, g.h - pad.b);
+  ctx.lineTo(g.w - pad.r, g.h - pad.b); ctx.stroke();
+  ctx.fillStyle = css("--ink2"); ctx.font = "9px system-ui"; ctx.textAlign = "right";
+  ctx.fillText(label(yTop), pad.l - 4, pad.t + 7);
+  ctx.fillText(label(0), pad.l - 4, g.h - pad.b);
+}
+
+function xy(g, fx, value, yTop) {
+  return [g.pad.l + clamp01(fx) * (g.w - g.pad.l - g.pad.r),
+          g.h - g.pad.b - clamp01(value / (yTop || 1)) * (g.h - g.pad.t - g.pad.b)];
+}
+
+function line(g, points, colour, yTop, width) {
+  if (points.length < 2) return;
+  const ctx = g.ctx;
+  ctx.strokeStyle = colour; ctx.lineWidth = width || 2; ctx.lineJoin = "round";
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const p = xy(g, points[i][0], points[i][1], yTop);
+    i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]);
+  }
+  ctx.stroke();
+}
+
+function band(g, points, colour, yTop) {
+  if (points.length < 2) return;
+  const ctx = g.ctx;
+  ctx.fillStyle = colour; ctx.globalAlpha = 0.2;
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const p = xy(g, points[i][0], points[i][2], yTop);
+    i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]);
+  }
+  for (let i = points.length - 1; i >= 0; i--) {
+    const p = xy(g, points[i][0], points[i][1], yTop);
+    ctx.lineTo(p[0], p[1]);
+  }
+  ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+}
+
+function corner(g, text) {
+  g.ctx.fillStyle = css("--ink2"); g.ctx.font = "9px system-ui";
+  g.ctx.textAlign = "right";
+  g.ctx.fillText(text, g.w - g.pad.r, g.pad.t - 4);
+}
+
+/* ------------------------------------------------------------------ panels --- */
+const KNOWLEDGE_ORDER = ["settled", "held_and_body", "held_no_body", "body_only",
+                         "verifying", "requested", "none"];
+const KNOWLEDGE_COLOUR = {
+  settled: "--k-settled", held_and_body: "--k-held-body",
+  held_no_body: "--k-held-nobody", body_only: "--k-body",
+  verifying: "--k-verifying", requested: "--k-requested", none: "--k-none",
+};
+const KIND_COLOUR = ["--s1", "--s2", "--s3", "--s4", "--s5"];
+
+const DROP_REASONS = ["egress_full", "verify_recv", "verify_wrapper",
+                     "verify_block"];
+const DROP_COLOUR = { egress_full: "--s3", verify_recv: "--s5",
+                      verify_wrapper: "--s4", verify_block: "--s1" };
+
+const panels = [];
+function focusedSubset() {
+  return !!(feed.cfg && Array.isArray(feed.cfg.trace_focus));
+}
+/* A transaction's own clock: from its birth to its settlement, or to the
+   end of observation while it is still out there. The knowledge panel draws
+   against this rather than the run clock, so a transaction's whole story
+   fills the panel however long the run has been going. */
+function txClock(tx) {
+  const born = state.txBorn.get(tx) || 0;
+  const settled = state.settledAt.get(tx);
+  const end = settled !== undefined ? settled : Math.max(state.observedThrough, born);
+  // While the transaction is out there its clock ends at now, and a picture
+  // whose axis grew every frame would slide under the eye; the span is a
+  // whole number of slots, so the axis holds still within each slot and
+  // rescales once at the boundary, however long the life gets.
+  const slot = feed.cfg ? feed.cfg.slot_length : 4000;
+  const span = settled !== undefined
+      ? Math.max(1, end - born)
+      : Math.max(slot, Math.ceil((end - born) / slot) * slot);
+  return { born: born, end: end, span: span, settled: settled !== undefined };
+}
+
+/* ---- follow mode ----
+   A followed transaction has a whole life in the trace -- birth, the
+   knowledge wave, settlement, departure -- and in a live run the one worth
+   watching keeps changing. `auto` holds a transaction until its story ends
+   -- settled, or forgotten by every node -- or until `followSlots` slots have
+   passed, whichever comes first, then takes the youngest followed
+   transaction whose story has not ended. A long dwell tells each story to the
+   end; a dwell of one slot keeps to the front of the load. `pinned` is the
+   reader's own choice. All on the replay clock, so pause freezes it and
+   speed scales it. Followed means "has a knowledge transition", which every
+   followed transaction has from its birth. */
+let followMode = "auto", followSlots = 3, followSince = 0;
+let followPrev = { tx: null, at: 0 };
+/* Settled, or forgotten by every node. Not "its object left every view":
+   a transaction lives on inside the wrappers that claim it after every node
+   has retired the raw object, and the knowledge classes are what say so. */
+function txDone(tx) {
+  if (state.settledAt.has(tx)) return true;
+  const series = state.knowledgeBins.get(tx);
+  const last = series ? series[series.length - 1] : null;
+  return !!(last && (last.counts.none || 0) >= (state.nodeCount || 1));
+}
+function youngestFollowed(unsettledOnly) {
+  let best = null, bestBorn = -1;
+  for (const tx of state.knowledgeBins.keys()) {
+    const born = state.txBorn.get(tx);
+    if (born === undefined || born > player.simT) continue;
+    if (unsettledOnly && txDone(tx)) continue;
+    if (born > bestBorn) { bestBorn = born; best = tx; }
+  }
+  return best;
+}
+function followTick() {
+  if (followMode === "pinned") return;
+  const now = player.simT;
+  if (followSince > now) followSince = now;   // the replay restarted
+  const slot = feed.cfg ? feed.cfg.slot_length : 4000;
+  const current = chosenFollowed;
+  const stale = current === null || !state.knowledgeBins.has(current) ||
+                txDone(current) || now - followSince >= followSlots * slot;
+  if (!stale) return;
+  const next = youngestFollowed(true);
+  if (next === null || next === current) return;
+  followPrev = { tx: current, at: now };
+  followSince = now;
+  chooseFollowed(next);
+}
+function setFollowMode(mode) {
+  followMode = mode;
+  followSince = 0;
+  $("follow").value = mode;
+  $("netfollow").value = mode;
+}
+function setFollowSlots(value) {
+  followSlots = Math.max(1, parseInt(value, 10) || 1);
+  $("slots").value = String(followSlots);
+  $("netslots").value = String(followSlots);
+}
+function pinFollow() { setFollowMode("pinned"); }
+
+function selectedFollowed() {
+  if (chosenFollowed !== null && state.knowledgeBins.has(chosenFollowed))
+    return chosenFollowed;
+  const keys = Array.from(state.knowledgeBins.keys()).sort((a, b) => a - b);
+  return keys.length ? keys[0] : null;
+}
+function selectedObject() {
+  if (chosenObject !== null && state.objects.has(chosenObject))
+    return state.objects.get(chosenObject);
+  const first = state.objects.keys().next();
+  return first.done ? null : state.objects.get(first.value);
+}
+
+/* A1 -- residency by birth cohort. Reach and residency are two different
+   claims about one object -- "reached 90% of nodes" and "is held by 90% of
+   nodes" are different sentences, and the gap between them is the retirement
+   rate -- and the selected object's panel draws both. This one draws only
+   residency, because a mean of reach over a cohort is a number nothing in the
+   protocol ever sees. */
+panels.push({
+  id: "a1", title: "residency by birth cohort", feature: true,
+  help: "Each row is a cohort of objects born in the same slice of the run, " +
+    "oldest at the top; each column is a slice of the objects' own age; a " +
+    "cell is the mean fraction of nodes holding those objects at that age. " +
+    "Residency is a step function, so a cell between two samples carries the " +
+    "last value forward — but never past the point an object was last " +
+    "observed. The age axis stops at the 90th percentile of observed ages so " +
+    "a few long-lived objects do not squash the rest; the label says how many " +
+    "run longer. A backlog reads as later rows darkening more slowly than " +
+    "earlier ones.",
+  note: function () {
+    return focusedSubset()
+      ? "unavailable: a fraction of the network needs every node, and this trace has a focus subset"
+      : "mean residency of each birth cohort against the objects' own age";
+  },
+  disabled: focusedSubset,
+  legend: function () {
+    return [["0%", heatColour(0)], ["50%", heatColour(0.5)], ["100%", heatColour(1)],
+            ["rows are birth cohorts, oldest at top", css("--ink2")]];
+  },
+  draw: drawCohorts,
+  readAt: function (fraction) {
+    const grid = cohortGrid();
+    if (!grid) return null;
+    const column = Math.min(A1_AGE_BINS - 1,
+                            Math.floor(fraction * A1_AGE_BINS));
+    const rows = ["age ≈ " +
+      (grid.maxAge * (column + 0.5) / A1_AGE_BINS).toFixed(0) + " ms"];
+    for (let row = 0; row < A1_COHORTS; row++) {
+      const value = grid.cells[row][column];
+      if (value === null) continue;
+      const from = grid.firstBorn +
+        (grid.lastBorn - grid.firstBorn) * row / A1_COHORTS;
+      rows.push("born " + (from / 1000).toFixed(1) + "s: " +
+                (value * 100).toFixed(0) + "%");
+    }
+    return rows.length > 1 ? rows : null;
+  },
+  table: function () {
+    const grid = cohortGrid();
+    const rows = [["born from", "at ¼ age", "½", "¾", "full", "age"]];
+    if (!grid) return rows;
+    const pct = v => v === null ? "—" : (v * 100).toFixed(0) + "%";
+    for (let row = 0; row < A1_COHORTS; row++) {
+      const cells = [0.25, 0.5, 0.75, 1].map(f =>
+        grid.cells[row][Math.min(A1_AGE_BINS - 1, Math.floor(f * A1_AGE_BINS) - 1)]);
+      if (cells.every(v => v === null)) continue;
+      const from = grid.firstBorn + (grid.lastBorn - grid.firstBorn) * row / A1_COHORTS;
+      rows.push([(from / 1000).toFixed(2) + " s"].concat(cells.map(pct),
+                [grid.maxAge.toFixed(0) + " ms"]));
+    }
+    return rows;
+  },
+});
+
+/* H -- the same wave, averaged. Against age rather than the clock, for the
+   reason the tiles carry no mean-propagation figure: averaging over objects
+   born seconds apart on one clock mixes the wave with the arrival process. */
+panels.push({
+  id: "h", title: "residency by hop distance, all objects", feature: true,
+  help: "For every object, the nodes are grouped by hop distance from the node it " +
+    "entered at; each line is the mean over objects of the fraction of nodes " +
+    "at that hop holding the object, against the object's own age. Age rather " +
+    "than the clock, because averaging objects born seconds apart on one " +
+    "clock mixes the wave with the arrival process. Outer rings rising after " +
+    "inner ones is the propagation wave; every line falling afterwards is " +
+    "retirement once the object settles. Hop 0 is the entry node alone. The " +
+    "readout says how many objects each mean is over — the right tail is " +
+    "where that count is small and the lines get jumpy.",
+  note: function () {
+    return hopUnavailable() ||
+      "mean share of the nodes at each hop from every object's own entry, against age";
+  },
+  disabled: function () { return hopUnavailable() !== null; },
+  legend: function () {
+    const grid = hopGrid();
+    return grid ? hopLegend(grid.farthest) : [];
+  },
+  draw: function (g) {
+    const grid = hopGrid();
+    if (!grid) return;
+    axes(g, 1, v => (v * 100).toFixed(0) + "%");
+    for (let h = 0; h <= grid.farthest; h++) {
+      const points = [];
+      for (let column = 0; column < A1_AGE_BINS; column++) {
+        const value = grid.cells[h][column];
+        if (value !== null) points.push([(column + 0.5) / A1_AGE_BINS, value]);
+      }
+      line(g, points, hopColour(h, grid.farthest), 1, 2);
+    }
+    horizonLabel(g, grid);
+  },
+  readAt: function (fraction) {
+    const grid = hopGrid();
+    if (!grid) return null;
+    const column = Math.min(A1_AGE_BINS - 1, Math.floor(fraction * A1_AGE_BINS));
+    const rows = ["age ≈ " +
+      (grid.maxAge * (column + 0.5) / A1_AGE_BINS).toFixed(0) + " ms"];
+    for (let h = 0; h <= grid.farthest; h++) {
+      const value = grid.cells[h][column];
+      if (value === null) continue;
+      rows.push("hop " + h + ": " + (value * 100).toFixed(0) + "% of " +
+                grid.counts[h][column] + " objects");
+    }
+    return rows.length > 1 ? rows : null;
+  },
+  table: function () {
+    const grid = hopGrid();
+    const rows = [["hops", "at ¼ age", "½", "¾", "full", "objects at full"]];
+    if (!grid) return rows;
+    const pct = v => v === null ? "—" : (v * 100).toFixed(0) + "%";
+    for (let h = 0; h <= grid.farthest; h++) {
+      const at = [0.25, 0.5, 0.75, 1].map(f =>
+        Math.min(A1_AGE_BINS - 1, Math.floor(f * A1_AGE_BINS) - 1));
+      const cells = at.map(column => grid.cells[h][column]);
+      if (cells.every(v => v === null)) continue;
+      rows.push([h].concat(cells.map(pct),
+                [grid.counts[h] ? grid.counts[h][at[3]] : 0]));
+    }
+    return rows;
+  },
+});
+
+/* B -- dispersion. A single node cannot show disagreement, which is the only
+   reason a networked model exists at all. Extrema live in the table: at ten
+   thousand nodes a min-to-max band is a solid block. */
+/* One chart per measure. Two measures on one frame invites reading a crossing
+   as meaningful when the two have nothing to do with each other, and Part I
+   forbids two y-scales outright -- this is the same objection one step earlier. */
+function utilisationPanel(id, key, title, colour) {
+  return {
+    id: id, title: title, timeAxis: true,
+    help: "Every node's busy time in each counter interval, differenced per node " +
+      "and then reduced across nodes: the median line, the p05–p95 band, and " +
+      "the maximum. A single number cannot show disagreement between nodes, " +
+      "which is the reason a networked model exists; the band is the spread. " +
+      "Extremes live in the table. Under a focus subset the reduction covers " +
+      "only the traced nodes.",
+    note: function () {
+      return focusedSubset()
+        ? "over the focus subset, not the network"
+        : "median with p05–p95 · differenced per node, then reduced";
+    },
+    legend: function () {
+      return [["median", css(colour)], ["p05–p95", css(colour)],
+              ["max", css("--ghost")]];
+    },
+    draw: function (g) {
+      if (state.dispersion.length < 2) return;
+      const span = Math.max(state.observedThrough, 1);
+      axes(g, 1, v => (v * 100).toFixed(0) + "%");
+      const points = state.dispersion.filter(d => d[key]);
+      band(g, points.map(d => [d.t / span, d[key].p05, d[key].p95]),
+           css(colour), 1);
+      line(g, points.map(d => [d.t / span, d[key].max]), css("--ghost"), 1, 1);
+      line(g, points.map(d => [d.t / span, d[key].med]), css(colour), 1, 2);
+      corner(g, state.dispersion.length + " complete boundaries");
+    },
+    readAt: function (fraction) {
+      const point = sampleAt(state.dispersion.filter(d => d[key]), fraction);
+      if (!point) return null;
+      const pct = v => (v * 100).toFixed(1) + "%";
+      return ["t " + (point.t / 1000).toFixed(2) + " s",
+              "median " + pct(point[key].med),
+              "p05–p95 " + pct(point[key].p05) + "–" + pct(point[key].p95),
+              "max " + pct(point[key].max)];
+    },
+    table: function () {
+      const rows = [["t", "p05", "median", "p95", "max"]];
+      const pct = (q, k) => q ? (q[k] * 100).toFixed(1) + "%" : "n/a";
+      for (const point of state.dispersion.slice(-40)) {
+        rows.push([point.t.toFixed(0), pct(point[key], "p05"),
+                   pct(point[key], "med"), pct(point[key], "p95"),
+                   pct(point[key], "max")]);
+      }
+      return rows;
+    },
+  };
+}
+panels.push(utilisationPanel("b1", "egress", "egress utilisation across nodes",
+                             "--s4"));
+panels.push(utilisationPanel("b2", "cpu", "cpu utilisation across nodes",
+                             "--s5"));
+
+/* C -- queues and backlog. A backlog that keeps growing through the load and
+   does not drain after it is what overload looks like; the servers shed a
+   backlog only by working through it. Queue depths are gauges rather than
+   differences, so they reduce directly. */
+panels.push({
+  id: "c", title: "queue depth and view size", timeAxis: true,
+  help: "Gauges rather than rates: the deepest egress queue and the deepest CPU " +
+    "queue anywhere in the network, and the median view size, at each counter " +
+    "sample. A " +
+    "backlog that keeps growing through the load and does not drain after it " +
+    "is what overload looks like, since the servers shed one only by working " +
+    "through it. Maxima, because one saturated node " +
+    "is the story a median would hide.",
+  note: function () { return "gauges, reduced directly · maxima, not medians"; },
+  legend: function () {
+    return [["egress queue max", css("--s3")], ["cpu queue max", css("--s5")],
+            ["view size median", css("--s2")]];
+  },
+  draw: function (g) {
+    if (state.dispersion.length < 2) return;
+    const span = Math.max(state.observedThrough, 1);
+    let top = 1;
+    for (const d of state.dispersion) {
+      if (d.eq && d.eq.max > top) top = d.eq.max;
+      if (d.cq && d.cq.max > top) top = d.cq.max;
+      if (d.held && d.held.med > top) top = d.held.med;
+    }
+    axes(g, top, v => v.toFixed(0));
+    line(g, state.dispersion.filter(d => d.eq).map(d => [d.t / span, d.eq.max]),
+         css("--s3"), top, 2);
+    line(g, state.dispersion.filter(d => d.cq).map(d => [d.t / span, d.cq.max]),
+         css("--s5"), top, 2);
+    line(g, state.dispersion.filter(d => d.held).map(d => [d.t / span, d.held.med]),
+         css("--s2"), top, 2);
+  },
+  readAt: function (fraction) {
+    const point = sampleAt(state.dispersion, fraction);
+    if (!point) return null;
+    return ["t " + (point.t / 1000).toFixed(2) + " s",
+            "egress queue max " + (point.eq ? point.eq.max : "n/a"),
+            "cpu queue max " + (point.cq ? point.cq.max : "n/a"),
+            "held median " + (point.held ? point.held.med : "n/a")];
+  },
+  table: function () {
+    const rows = [["t", "egress q max", "cpu q max", "held median", "stale median"]];
+    for (const point of state.dispersion.slice(-40)) {
+      rows.push([point.t.toFixed(0),
+                 point.eq ? point.eq.max : "n/a",
+                 point.cq ? point.cq.max : "n/a",
+                 point.held ? point.held.med : "n/a",
+                 /* `stale` is -1 under instant notification because the model
+                    cannot express the effect there. An absence, not a zero. */
+                 point.stale ? point.stale.med : "n/a"]);
+    }
+    return rows;
+  },
+});
+
+/* D -- bytes by kind. From the counters, never from `snd`: that records the size
+   offered at enqueue, so it establishes neither the completion of egress nor
+   arrival, and it is the one event kind sampling thins. Nothing in this viewer
+   depends on a sampled event. */
+panels.push({
+  id: "d", title: "bytes by payload kind", timeAxis: true,
+  help: "Cumulative bytes from the per-node counters, never from send events, " +
+    "which sampling thins. Three totals: offered to egress queues, sent " +
+    "(completed node egress, split by payload kind), and ingress at " +
+    "receivers. Offered minus sent is what is still queued; sent minus " +
+    "ingress is what has left a sender and not yet arrived. Network-wide sent " +
+    "and ingress agree only after a full drain.",
+  note: function () {
+    /* Three different questions, and the gaps between them are the content:
+       offered minus sent is what is still queued, and sent minus ingress is what
+       has left a sender and not yet arrived. "Sent" is completed *node egress*,
+       so network-wide sent and ingress are equal only after a full drain. */
+    return "offered / sent / ingress · the gaps are backlog and flight";
+  },
+  legend: function () {
+    const byKind = Array.from(state.kinds).sort().map((kind, index) =>
+      [kind + " (sent)", css(KIND_COLOUR[index % KIND_COLOUR.length])]);
+    return byKind.concat([["offered total", css("--ink2")],
+                          ["ingress total", css("--ghost")]]);
+  },
+  draw: function (g) {
+    if (state.bytes.length < 2) return;
+    const span = Math.max(state.observedThrough, 1);
+    const kinds = Array.from(state.kinds).sort();
+    const sum = (table) => {
+      let total = 0;
+      for (const kind in table) total += table[kind];
+      return total;
+    };
+    let top = 1;
+    for (const point of state.bytes) {
+      const offered = sum(point.obk);
+      if (offered > top) top = offered;
+    }
+    axes(g, top, v => (v / 1e6).toFixed(1) + "MB");
+    const ctx = g.ctx;
+    /* Drawn from the top of the stack down, so each band is painted over the one
+       beneath it and the visible thickness is that kind's share. */
+    const cumulative = state.bytes.map(point => {
+      let base = 0;
+      return kinds.map(kind => (base += point.sbk[kind] || 0));
+    });
+    for (let index = kinds.length - 1; index >= 0; index--) {
+      ctx.fillStyle = css(KIND_COLOUR[index % KIND_COLOUR.length]);
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      const startPoint = xy(g, state.bytes[0].t / span, 0, top);
+      ctx.moveTo(startPoint[0], startPoint[1]);
+      for (let i = 0; i < state.bytes.length; i++) {
+        const p = xy(g, state.bytes[i].t / span, cumulative[i][index], top);
+        ctx.lineTo(p[0], p[1]);
+      }
+      const endPoint = xy(g, state.bytes[state.bytes.length - 1].t / span, 0, top);
+      ctx.lineTo(endPoint[0], endPoint[1]);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    /* Offered above the stack and ingress below it. Where offered pulls away
+       from the top of the stack, that gap is bytes sitting in send buffers --
+       which is what overload looks like before anything is dropped. */
+    line(g, state.bytes.map(p => [p.t / span, sum(p.obk)]), css("--ink2"), top, 1);
+    line(g, state.bytes.map(p => [p.t / span, sum(p.ibk)]), css("--ghost"), top, 1);
+  },
+  readAt: function (fraction) {
+    const point = sampleAt(state.bytes, fraction);
+    if (!point) return null;
+    const sum = (table) => {
+      let value = 0;
+      for (const kind in table) value += table[kind];
+      return value;
+    };
+    const mb = v => (v / 1e6).toFixed(1) + " MB";
+    const rows = ["t " + (point.t / 1000).toFixed(2) + " s",
+                  "offered " + mb(sum(point.obk)),
+                  "sent " + mb(sum(point.sbk)),
+                  "ingress " + mb(sum(point.ibk))];
+    for (const kind of Array.from(state.kinds).sort()) {
+      rows.push("· " + kind + " " + mb(point.sbk[kind] || 0));
+    }
+    return rows;
+  },
+  table: function () {
+    const kinds = Array.from(state.kinds).sort();
+    const total = (table) => {
+      let value = 0;
+      for (const kind in table) value += table[kind];
+      return value;
+    };
+    const rows = [["t", "offered MB", "sent MB", "ingress MB"]
+      .concat(kinds.map(k => k + " sent")).concat(["dup in MB"])];
+    for (const point of state.bytes.slice(-40)) {
+      rows.push([point.t.toFixed(0),
+                 (total(point.obk) / 1e6).toFixed(3),
+                 (total(point.sbk) / 1e6).toFixed(3),
+                 (total(point.ibk) / 1e6).toFixed(3)]
+        .concat(kinds.map(k => ((point.sbk[k] || 0) / 1e6).toFixed(3)))
+        .concat([(point.idb / 1e6).toFixed(3)]));
+    }
+    return rows;
+  },
+});
+
+/* G -- losses. Bounded queues made overload expressible and nothing here could
+   see it: a drop is the one thing that does not show up as bytes, delay or
+   coverage until after the fact. Two questions, so two things drawn: how much is
+   being lost and for which reason, and how full the buffers are against the bound
+   that produced the losses. */
+panels.push({
+  id: "g", title: "losses and buffer pressure", timeAxis: true,
+  help: "Drops are losses, never traffic: each tick on the baseline is a message " +
+    "refused, coloured by why. Above it, send-buffer occupancy is drawn " +
+    "against its own bound when one is configured, so the axis means how " +
+    "close the buffers are to refusing; without a bound the raw maximum is " +
+    "drawn instead. When nothing is bounded and nothing dropped, the panel " +
+    "says so.",
+  note: function () {
+    const bound = feed.cfg && feed.cfg.egress_queue_bytes;
+    if (!state.drops.total && !bound)
+      return "nothing bounded and nothing dropped — pass egress_queue_bytes or cpu_queue_jobs";
+    if (bound && bound > 0)
+      return "queued bytes against a " + (bound / 1e6).toFixed(1) +
+             " MB send buffer · drops are losses, never traffic";
+    return "drops are losses, never traffic";
+  },
+  legend: function () {
+    const rows = DROP_REASONS.filter(r => state.drops.byReason[r])
+      .map(r => [r.replace(/_/g, " "), css(DROP_COLOUR[r])]);
+    return rows.concat([["queued bytes (max)", css("--ink2")]]);
+  },
+  draw: function (g) {
+    const span = Math.max(state.observedThrough, 1);
+    const bound = feed.cfg ? feed.cfg.egress_queue_bytes : -1;
+    /* Buffer occupancy against its own bound, so the axis means "how close to
+       refusing" rather than an unanchored byte count. Without a bound there is
+       nothing to be a fraction of, and the raw maximum is drawn instead. */
+    const haveQueue = state.dispersion.some(d => d.eqb);
+    if (haveQueue && bound && bound > 0) {
+      axes(g, 1, v => (v * 100).toFixed(0) + "%");
+      const points = state.dispersion.filter(d => d.eqb);
+      band(g, points.map(d => [d.t / span, d.eqb.p05 / bound,
+                               d.eqb.p95 / bound]), css("--ink2"), 1);
+      line(g, points.map(d => [d.t / span, d.eqb.max / bound]),
+           css("--ink2"), 1, 2);
+      corner(g, "full buffer = 100%");
+    } else if (haveQueue) {
+      let top = 1;
+      for (const d of state.dispersion) {
+        if (d.eqb && d.eqb.max > top) top = d.eqb.max;
+      }
+      axes(g, top, v => (v / 1e6).toFixed(1) + "MB");
+      line(g, state.dispersion.filter(d => d.eqb)
+        .map(d => [d.t / span, d.eqb.max]), css("--ink2"), top, 2);
+      corner(g, "unbounded — no fraction to draw");
+    }
+    /* Drops as marks on the baseline rather than a series: they are events, and
+       a line between them would imply a rate the trace does not state. */
+    const ctx = g.ctx;
+    const floor = g.h - g.pad.b;
+    for (const drop of state.drops.recent) {
+      if (drop.t > player.simT) continue;
+      const x = xy(g, drop.t / span, 0, 1)[0];
+      ctx.fillStyle = css(DROP_COLOUR[drop.why] || "--s3");
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(x, floor - 8, 1.5, 8);
+      ctx.globalAlpha = 1;
+    }
+  },
+  readAt: function (fraction) {
+    const point = sampleAt(state.dispersion.filter(d => d.eqb), fraction);
+    const bound = feed.cfg ? feed.cfg.egress_queue_bytes : -1;
+    const rows = [];
+    if (point) {
+      rows.push("t " + (point.t / 1000).toFixed(2) + " s");
+      const mb = v => (v / 1e6).toFixed(2) + " MB";
+      rows.push("queued max " + mb(point.eqb.max) +
+                (bound > 0 ? " (" + (100 * point.eqb.max / bound).toFixed(0) +
+                 "% of buffer)" : ""));
+      rows.push("queued median " + mb(point.eqb.med));
+    }
+    // Drops near the pointer, since they are events rather than a series.
+    const span = Math.max(state.observedThrough, 1);
+    const target = fraction * span;
+    const width = span / 60;
+    const nearby = {};
+    let count = 0;
+    for (const drop of state.drops.recent) {
+      if (drop.t > player.simT) continue;
+      if (Math.abs(drop.t - target) > width) continue;
+      nearby[drop.why] = (nearby[drop.why] || 0) + 1;
+      count += 1;
+    }
+    if (count) {
+      rows.push("drops nearby: " + count);
+      for (const why of Object.keys(nearby).sort()) {
+        rows.push("· " + why.replace(/_/g, " ") + " " + nearby[why]);
+      }
+    }
+    return rows.length ? rows : null;
+  },
+  table: function () {
+    const rows = [["reason", "messages"]];
+    for (const why of Object.keys(state.drops.byReason).sort()) {
+      rows.push([why, state.drops.byReason[why]]);
+    }
+    rows.push(["— total", state.drops.total]);
+    rows.push(["— bytes", (state.drops.bytes / 1e6).toFixed(2) + " MB"]);
+    const droppers = Object.keys(state.drops.byNode)
+      .sort((a, b) => state.drops.byNode[b] - state.drops.byNode[a]);
+    for (const node of droppers.slice(0, 12)) {
+      rows.push(["node " + node, state.drops.byNode[node]]);
+    }
+    return rows;
+  },
+});
+
+/* A2 -- the knowledge partition. A stacked area is honest only if the classes
+   are mutually exclusive and exhaustive, which the simulator's precedence
+   projection guarantees; the counts sum to N by construction. Drawn as steps,
+   because a class count is constant between transitions and smoothing would
+   invent motion that did not happen. */
+panels.push({
+  id: "a2", title: "knowledge classes, followed transaction", feature: true,
+  scoped: true,
+  help: "For the followed transaction, every node's knowledge class from its " +
+    "birth to its settlement, or to now, on the transaction's own clock, " +
+    "stacked to the node count: settled, held with body, held without " +
+    "body, body only, verifying, requested, none. Hue is evidence, pale is " +
+    "body-absent, grey is settled. The classes are exclusive and exhaustive, " +
+    "which is what makes a stacked area an honest partition; nodes that never " +
+    "transitioned are counted in none. Drawn as steps, because a class count " +
+    "is constant between transitions and smoothing would invent motion that " +
+    "did not happen.",
+  note: function () {
+    if (focusedSubset()) return "unavailable: needs every node";
+    if (!state.knowledgeBins.size)
+      return "no transactions followed — pass trace_follow_rate or trace_follow to see this";
+    return "stacked to N · hue is evidence, pale is body-absent, grey is settled" +
+      spreadSummary(selectedFollowed()) + dupSummary(selectedFollowed());
+  },
+  disabled: function () { return focusedSubset() || !state.knowledgeBins.size; },
+  legend: function () {
+    return KNOWLEDGE_ORDER.map(k => [k.replace(/_/g, " "), css(KNOWLEDGE_COLOUR[k])]);
+  },
+  draw: function (g) {
+    const tx = selectedFollowed();
+    const series = tx === null ? null : state.knowledgeBins.get(tx);
+    if (!series || !series.length) return;
+    const nodes = state.nodeCount || 1;
+    const clock = txClock(tx);
+    axes(g, nodes, v => v.toFixed(0));
+    const ctx = g.ctx;
+    for (let i = 0; i < series.length; i++) {
+      const point = series[i];
+      const next = series[i + 1];
+      const x0 = (point.t - clock.born) / clock.span;
+      const x1 = ((next ? next.t : clock.end) - clock.born) / clock.span;
+      let base = 0;
+      for (const klass of KNOWLEDGE_ORDER) {
+        const value = point.counts[klass] || 0;
+        if (!value) continue;
+        const top = xy(g, x0, base + value, nodes);
+        const bottom = xy(g, x1, base, nodes);
+        ctx.fillStyle = css(KNOWLEDGE_COLOUR[klass]);
+        ctx.fillRect(top[0], top[1], Math.max(1, bottom[0] - top[0]),
+                     bottom[1] - top[1]);
+        base += value;
+      }
+    }
+    corner(g, "tx " + tx + " · born " + (clock.born / 1000).toFixed(2) + " s · " +
+           (clock.settled ? "settled at +" : "observed to +") +
+           (clock.span / 1000).toFixed(2) + " s · " + nodes + " nodes");
+  },
+  readAt: function (fraction) {
+    const tx = selectedFollowed();
+    const series = tx === null ? null : state.knowledgeBins.get(tx);
+    if (!series || !series.length) return null;
+    const clock = txClock(tx);
+    const at = clock.born + fraction * clock.span;
+    let point = null;
+    for (const candidate of series) {
+      if (candidate.t <= at || point === null) point = candidate;
+      if (candidate.t > at) break;
+    }
+    const rows = ["t " + (point.t / 1000).toFixed(2) + " s (+" +
+                  ((point.t - clock.born) / 1000).toFixed(2) + ")", "tx " + tx];
+    for (const klass of KNOWLEDGE_ORDER) {
+      const value = point.counts[klass] || 0;
+      if (value) rows.push("· " + klass.replace(/_/g, " ") + " " + value);
+    }
+    return rows;
+  },
+  table: function () {
+    const tx = selectedFollowed();
+    const series = (tx === null ? [] : state.knowledgeBins.get(tx)) || [];
+    const rows = [["t"].concat(KNOWLEDGE_ORDER.map(k => k.replace(/_/g, " ")))];
+    for (const point of series.slice(-40)) {
+      rows.push([point.t.toFixed(1)].concat(
+        KNOWLEDGE_ORDER.map(k => point.counts[k] || 0)));
+    }
+    return rows;
+  },
+});
+
+/* AO -- the selected object against every other one. The drill-down under
+   the cohort grid: one object's reach and residency drawn on top of all
+   objects' residency, each against its own age. */
+panels.push({
+  id: "ao", title: "residency and reach, selected object", feature: true,
+  scoped: true,
+  help: "The selected object's reach — the fraction of nodes that ever admitted " +
+    "it — and residency — the fraction holding it now — against its own age, " +
+    "over every other object's residency in faint lines. Reach never falls; " +
+    "residency does, and the gap between the two is retirement. Until the " +
+    "trace declares itself finished, the end of the line is where observation " +
+    "stopped, not where the object did; the marker says right-censored.",
+  note: function () {
+    return focusedSubset()
+      ? "unavailable: a fraction of the network needs every node, and this trace has a focus subset"
+      : "against its own age · faint lines are all objects";
+  },
+  disabled: focusedSubset,
+  legend: function () {
+    return [["reach, selected", css("--s1")],
+            ["residency, selected", css("--s3")],
+            ["residency, all objects", css("--s2")]];
+  },
+  draw: function (g) {
+    const records = Array.from(state.objects.values());
+    if (!records.length) return;
+    let maxAge = 1;
+    for (const record of records) {
+      const last = record.bins[record.bins.length - 1];
+      if (last && last.age > maxAge) maxAge = last.age;
+    }
+    const nodes = state.nodeCount || 1;
+    axes(g, 1, v => (v * 100).toFixed(0) + "%");
+    g.ctx.globalAlpha = 0.14;
+    for (const record of records) {
+      if (record.bins.length < 2) continue;
+      line(g, record.bins.map(b => [b.age / maxAge, b.res / nodes]),
+           css("--s2"), 1, 1);
+    }
+    g.ctx.globalAlpha = 1;
+    const chosen = selectedObject();
+    if (chosen && chosen.bins.length > 1) {
+      line(g, chosen.bins.map(b => [b.age / maxAge, b.reach / nodes]),
+           css("--s1"), 1, 2);
+      line(g, chosen.bins.map(b => [b.age / maxAge, b.res / nodes]),
+           css("--s3"), 1, 2);
+      const last = chosen.bins[chosen.bins.length - 1];
+      /* A flat line is not the same as a finished one. Until the trace declares
+         itself terminal, the end of an object's series is where observation
+         stopped -- right-censored -- and saying so is the whole reason `seg` and
+         `end` exist. */
+      if (state.finished === null && last.reach < nodes) {
+        const p = xy(g, last.age / maxAge, last.reach / nodes, 1);
+        g.ctx.strokeStyle = css("--ink2"); g.ctx.lineWidth = 1.5;
+        g.ctx.beginPath(); g.ctx.arc(p[0], p[1], 3.5, 0, 6.2832); g.ctx.stroke();
+        corner(g, "◦ right-censored: observation ends here");
+      }
+    }
+    g.ctx.fillStyle = css("--ink2"); g.ctx.font = "9px system-ui";
+    g.ctx.textAlign = "left";
+    g.ctx.fillText("age → " + maxAge.toFixed(0) + " ms", g.pad.l + 2, g.h - 6);
+  },
+  readAt: function (fraction) {
+    const chosen = selectedObject();
+    if (!chosen || chosen.bins.length < 2) return null;
+    let maxAge = 1;
+    for (const record of state.objects.values()) {
+      const last = record.bins[record.bins.length - 1];
+      if (last && last.age > maxAge) maxAge = last.age;
+    }
+    const nodes = state.nodeCount || 1;
+    const point = sampleAt(chosen.bins, fraction * maxAge / Math.max(
+      state.observedThrough, 1), b => b.age);
+    if (!point) return null;
+    return ["object " + chosen.id,
+            "age " + point.age.toFixed(0) + " ms",
+            "reach " + (100 * point.reach / nodes).toFixed(1) + "%",
+            "residency " + (100 * point.res / nodes).toFixed(1) + "%"];
+  },
+  table: function () {
+    const nodes = state.nodeCount || 1;
+    const rows = [["object", "tx", "born", "reach", "residency"]];
+    const records = Array.from(state.objects.values()).slice(-40);
+    for (const record of records) {
+      rows.push([record.id, record.tx === undefined ? "—" : record.tx,
+                 record.born.toFixed(0),
+                 (100 * record.reach.size / nodes).toFixed(1) + "%",
+                 (100 * record.resident.size / nodes).toFixed(1) + "%"]);
+    }
+    return rows;
+  },
+});
+
+/* F -- coverage by hop distance against age. Deliberately not a node-link
+   graph: a random regular overlay has no geometry to draw, so a force-directed
+   picture of one is a hairball whose apparent clusters are artefacts of the
+   layout. Distance is one-dimensional, and against the object's own age it is
+   the wave itself: each ring's line rises after the one inside it. */
+function hopUnavailable() {
+  if (!feed.cfg) return "";
+  if (feed.cfg.topology === "omitted")
+    return "unavailable: topology omitted from this trace (too many edges to record)";
+  if (state.nodeCount > HOP_TRACK_MAX_NODES)
+    return "unavailable: per-hop residency is kept only up to " +
+           HOP_TRACK_MAX_NODES + " nodes";
+  if (focusedSubset()) return "unavailable: needs every node";
+  return null;
+}
+function hopLegend(farthest) {
+  const rows = [];
+  for (let h = 0; h <= farthest; h++) rows.push(["hop " + h, hopColour(h, farthest)]);
+  return rows;
+}
+panels.push({
+  id: "f", title: "residency by hop distance, selected object", scoped: true,
+  help: "The nodes grouped by hop distance from the node this object entered at; " +
+    "each line is the fraction of nodes at that hop holding the object, " +
+    "against its own age. Exact, not a mean. Hop 0 is the entry node alone; " +
+    "the table gives the present count per hop. Deliberately not a node-link " +
+    "graph: a random regular overlay has no geometry, and a force-directed " +
+    "picture of one invents clusters that are artefacts of the layout.",
+  note: function () {
+    return hopUnavailable() ||
+      "share of the nodes at each hop from the object's own entry, against its age";
+  },
+  disabled: function () { return hopUnavailable() !== null; },
+  legend: function () {
+    const record = selectedObject();
+    const hops = record ? hopsFrom(record.entry) : null;
+    return hops ? hopLegend(hops.totals.length - 1) : [];
+  },
+  draw: function (g) {
+    const record = selectedObject();
+    const hops = record ? hopsFrom(record.entry) : null;
+    if (!hops || record.bins.length < 2) return;
+    const span = Math.max(1, record.bins[record.bins.length - 1].age);
+    const farthest = hops.totals.length - 1;
+    axes(g, 1, v => (v * 100).toFixed(0) + "%");
+    for (let h = 0; h <= farthest; h++) {
+      if (!hops.totals[h]) continue;
+      line(g, record.bins.map(b => [b.age / span, (b.hops[h] || 0) / hops.totals[h]]),
+           hopColour(h, farthest), 1, 2);
+    }
+    if (state.finished === null && record.reach.size < (state.nodeCount || 1))
+      corner(g, "◦ right-censored: observation ends here");
+    g.ctx.fillStyle = css("--ink2"); g.ctx.font = "9px system-ui";
+    g.ctx.textAlign = "left";
+    g.ctx.fillText("age → " + span.toFixed(0) + " ms", g.pad.l + 2, g.h - 6);
+  },
+  readAt: function (fraction) {
+    const record = selectedObject();
+    const hops = record ? hopsFrom(record.entry) : null;
+    if (!hops || record.bins.length < 2) return null;
+    const span = Math.max(1, record.bins[record.bins.length - 1].age);
+    const point = sampleAt(record.bins,
+      fraction * span / Math.max(state.observedThrough, 1), b => b.age);
+    if (!point) return null;
+    const rows = ["object " + record.id, "age " + point.age.toFixed(0) + " ms"];
+    for (let h = 0; h < hops.totals.length; h++) {
+      if (!hops.totals[h]) continue;
+      rows.push("hop " + h + ": " + (point.hops[h] || 0) + "/" + hops.totals[h]);
+    }
+    return rows;
+  },
+  table: function () {
+    const rows = [["hops", "nodes", "holding", "share"]];
+    const record = selectedObject();
+    const hops = record ? hopsFrom(record.entry) : null;
+    if (!hops) return rows;
+    for (let h = 0; h < hops.totals.length; h++) {
+      if (!hops.totals[h]) continue;
+      const held = record.byHop[h] || 0;
+      rows.push([h, hops.totals[h], held,
+                 (100 * held / hops.totals[h]).toFixed(1) + "%"]);
+    }
+    return rows;
+  },
+});
+
+/* The specified form: birth cohort against the object's own age, coloured by
+   residency. A hundred faint lines is density without a scale, and aligning every
+   line by age throws away the wall-clock ordering that shows a backlog building --
+   the cohort axis puts that ordering back. The line view stays as the drill-down,
+   which is what it is good at. */
+const A1_COHORTS = 12, A1_AGE_BINS = 60;
+
+/* The age axis stops at the 90th percentile of observed ages, not the maximum.
+   A handful of long-lived objects otherwise stretch it until every other
+   cohort is squashed into the left fifth of the panel and the whole thing
+   reads as empty -- which is exactly how this looked. Samples past the edge
+   are simply not drawn; they are not piled into the last column, because that
+   would invent a spike where there is only a truncated axis. */
+function ageHorizon(records) {
+  const lastAges = [];
+  for (const record of records) {
+    const last = record.bins[record.bins.length - 1];
+    if (last) lastAges.push(last.age);
+  }
+  lastAges.sort((a, b) => a - b);
+  let maxAge = 1;
+  if (lastAges.length) {
+    const at = lastAges[Math.min(lastAges.length - 1,
+                                 Math.floor(0.9 * (lastAges.length - 1)))];
+    maxAge = Math.max(1, at);
+  }
+  return { maxAge: maxAge, clipped: lastAges.filter(age => age > maxAge).length,
+           total: records.length };
+}
+
+function horizonLabel(g, horizon) {
+  g.ctx.fillStyle = css("--ink2"); g.ctx.font = "9px system-ui";
+  g.ctx.textAlign = "left";
+  g.ctx.fillText("age → " + horizon.maxAge.toFixed(0) + " ms" +
+                 (horizon.clipped ? "  (p90; " + horizon.clipped + " of " +
+                  horizon.total + " objects run longer)" : ""),
+                 g.pad.l + 2, g.h - 6);
+}
+
+function cohortGrid() {
+  const records = Array.from(state.objects.values());
+  if (!records.length) return null;
+  const nodes = state.nodeCount || 1;
+  let firstBorn = Infinity, lastBorn = -Infinity;
+  for (const record of records) {
+    if (record.born < firstBorn) firstBorn = record.born;
+    if (record.born > lastBorn) lastBorn = record.born;
+  }
+  const horizon = ageHorizon(records);
+  const maxAge = horizon.maxAge;
+  const bornSpan = Math.max(1, lastBorn - firstBorn);
+  // sum/count per cell, so a cell is a mean over the objects that fall in it and
+  // an empty cell stays empty rather than reading as zero coverage.
+  const cells = [];
+  for (let row = 0; row < A1_COHORTS; row++) {
+    cells.push(new Array(A1_AGE_BINS).fill(null));
+  }
+  const counts = [];
+  for (let row = 0; row < A1_COHORTS; row++) {
+    counts.push(new Array(A1_AGE_BINS).fill(0));
+  }
+  for (const record of records) {
+    if (!record.bins.length) continue;
+    const row = Math.min(A1_COHORTS - 1,
+      Math.floor(A1_COHORTS * (record.born - firstBorn) / bornSpan));
+    /* Residency is a *step function*: it changes only when a node admits or
+       drops, so between two samples it holds its last value. Filling only the
+       columns that happen to contain a sample left 94 cells of 720 populated on
+       a real trace and the panel read as empty -- the gaps were not missing
+       data, they were unchanged data.
+
+       Filled forward only as far as the object was actually observed. Carrying
+       past its last sample would invent coverage beyond the observation horizon,
+       which is exactly the censoring this project rewrote a benchmark to stop
+       doing. */
+    const lastBin = record.bins[record.bins.length - 1];
+    const lastColumn = Math.min(A1_AGE_BINS - 1,
+      Math.floor(A1_AGE_BINS * lastBin.age / maxAge));
+    let cursor = 0;
+    let carried = null;
+    for (let column = 0; column <= lastColumn; column++) {
+      const columnAge = maxAge * (column + 1) / A1_AGE_BINS;
+      while (cursor < record.bins.length &&
+             record.bins[cursor].age <= columnAge) {
+        carried = record.bins[cursor].res / nodes;
+        cursor += 1;
+      }
+      if (carried === null) continue;
+      cells[row][column] = (cells[row][column] || 0) + carried;
+      counts[row][column] += 1;
+    }
+  }
+  for (let row = 0; row < A1_COHORTS; row++) {
+    for (let column = 0; column < A1_AGE_BINS; column++) {
+      if (counts[row][column]) cells[row][column] /= counts[row][column];
+      else cells[row][column] = null;
+    }
+  }
+  return { cells: cells, counts: counts, maxAge: maxAge,
+           clipped: horizon.clipped, total: horizon.total,
+           firstBorn: firstBorn, lastBorn: lastBorn };
+}
+
+function rgbOf(colour) {
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(colour).trim());
+  if (!hex) return null;
+  let digits = hex[1];
+  if (digits.length === 3) digits = digits.split("").map(d => d + d).join("");
+  return [0, 2, 4].map(at => parseInt(digits.slice(at, at + 2), 16));
+}
+
+function heatColour(value) {
+  // One hue, light to dark: this is a magnitude, so a sequential ramp is the
+  // honest encoding and a rainbow would invent categories. Interpolated
+  // rather than bucketed: four buckets with the panel colour as the lowest
+  // made every node under a quarter of the ceiling vanish into the background.
+  const stops = ["--heat0", "--heat1", "--heat2", "--heat3"].map(n => rgbOf(css(n)));
+  if (stops.some(stop => !stop)) return css("--heat3");
+  const at = clamp01(value) * (stops.length - 1);
+  const low = Math.min(stops.length - 2, Math.floor(at)), t = at - low;
+  const mixed = stops[low].map((c, i) => Math.round(c + (stops[low + 1][i] - c) * t));
+  return "rgb(" + mixed.join(",") + ")";
+}
+
+function drawCohorts(g) {
+  const grid = cohortGrid();
+  if (!grid) return;
+  const ctx = g.ctx, pad = g.pad;
+  const width = (g.w - pad.l - pad.r) / A1_AGE_BINS;
+  const height = (g.h - pad.b - pad.t) / A1_COHORTS;
+  for (let row = 0; row < A1_COHORTS; row++) {
+    for (let column = 0; column < A1_AGE_BINS; column++) {
+      const value = grid.cells[row][column];
+      if (value === null) continue;
+      ctx.fillStyle = heatColour(value);
+      ctx.fillRect(pad.l + column * width, pad.t + row * height,
+                   Math.ceil(width), Math.ceil(height));
+    }
+  }
+  ctx.strokeStyle = css("--grid");
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad.l, pad.t, g.w - pad.l - pad.r, g.h - pad.b - pad.t);
+  horizonLabel(g, grid);
+  ctx.fillStyle = css("--ink2");
+  ctx.font = "9px system-ui";
+  ctx.textAlign = "right";
+  ctx.fillText("born " + (grid.firstBorn / 1000).toFixed(1) + "s → " +
+               (grid.lastBorn / 1000).toFixed(1) + "s",
+               g.w - pad.r, g.h - 6);
+}
+
+let adjacencyCache = null;
+function adjacency() {
+  const cfg = feed.cfg;
+  if (!cfg || cfg.topology === "omitted") return null;
+  if (adjacencyCache && adjacencyCache.owner === cfg) return adjacencyCache.map;
+  const map = new Map();
+  for (const edge of cfg.topology) {
+    if (!map.has(edge[0])) map.set(edge[0], []);
+    if (!map.has(edge[1])) map.set(edge[1], []);
+    map.get(edge[0]).push(edge[1]);
+    map.get(edge[1]).push(edge[0]);
+  }
+  adjacencyCache = { owner: cfg, map: map };
+  return map;
+}
+
+/* Hop distances from an entry node, cached per entry: an object's residency
+   per hop needs the distance of every node that admits it, and entries repeat.
+   The cache is at most N arrays of N 16-bit distances, so it is kept only for
+   graphs where that product is cheap; above the bound the hop panels are unavailable,
+   as they already are when the topology is omitted. */
+const HOP_TRACK_MAX_NODES = 4096;
+let hopCache = { owner: null, byEntry: new Map() };
+function hopsFrom(entry) {
+  if (entry === null || !feed.cfg || state.nodeCount > HOP_TRACK_MAX_NODES)
+    return null;
+  if (hopCache.owner !== feed.cfg) hopCache = { owner: feed.cfg, byEntry: new Map() };
+  let found = hopCache.byEntry.get(entry);
+  if (found) return found;
+  const distance = hopDistancesFrom(entry);
+  if (!distance) return null;
+  const dist = new Uint16Array(state.nodeCount).fill(65535);
+  const totals = [];
+  for (const pair of distance) {
+    const hops = Math.min(pair[1], 65534);
+    dist[pair[0]] = hops;
+    totals[hops] = (totals[hops] || 0) + 1;
+  }
+  found = { dist: dist, totals: Array.from(totals, v => v || 0) };
+  hopCache.byEntry.set(entry, found);
+  return found;
+}
+
+function hopTracked() {
+  return !!(feed.cfg && feed.cfg.topology !== "omitted" &&
+            state.nodeCount <= HOP_TRACK_MAX_NODES && !focusedSubset());
+}
+
+function hopShift(record, node, delta) {
+  const hops = hopsFrom(record.entry);
+  if (!hops || node >= hops.dist.length) return;
+  const h = hops.dist[node];
+  if (h === 65535) return;
+  record.byHop[h] = (record.byHop[h] || 0) + delta;
+}
+
+/* One hue, hop 0 solid and each further ring paler: an ordinal quantity gets
+   a sequential encoding, and the wave reads as the pale lines rising later. */
+function hopColour(hops, farthest) {
+  const base = css("--s2"), rgb = rgbOf(base);
+  if (!rgb) return base;
+  const alpha = 1 - 0.75 * hops / Math.max(farthest, 1);
+  return "rgba(" + rgb.join(",") + "," + alpha.toFixed(2) + ")";
+}
+
+/* Mean residency per hop against the objects' own age, over every object whose
+   entry has a node at that hop and which was observed to that age. Same carry-
+   forward and same horizon as the cohort grid, so the two panels share an axis. */
+function hopGrid() {
+  const records = Array.from(state.objects.values());
+  if (!records.length || !hopTracked()) return null;
+  const horizon = ageHorizon(records);
+  const maxAge = horizon.maxAge;
+  const sums = [], counts = [];
+  let farthest = 0;
+  for (const record of records) {
+    const hops = hopsFrom(record.entry);
+    if (!hops || !record.bins.length) continue;
+    if (hops.totals.length - 1 > farthest) farthest = hops.totals.length - 1;
+    const lastBin = record.bins[record.bins.length - 1];
+    const lastColumn = Math.min(A1_AGE_BINS - 1,
+      Math.floor(A1_AGE_BINS * lastBin.age / maxAge));
+    let cursor = 0, carried = null;
+    for (let column = 0; column <= lastColumn; column++) {
+      const columnAge = maxAge * (column + 1) / A1_AGE_BINS;
+      while (cursor < record.bins.length && record.bins[cursor].age <= columnAge) {
+        carried = record.bins[cursor].hops;
+        cursor += 1;
+      }
+      if (carried === null) continue;
+      for (let h = 0; h < hops.totals.length; h++) {
+        if (!hops.totals[h]) continue;
+        if (!sums[h]) { sums[h] = new Array(A1_AGE_BINS).fill(0);
+                        counts[h] = new Array(A1_AGE_BINS).fill(0); }
+        sums[h][column] += (carried[h] || 0) / hops.totals[h];
+        counts[h][column] += 1;
+      }
+    }
+  }
+  const cells = [];
+  for (let h = 0; h <= farthest; h++) {
+    cells.push(new Array(A1_AGE_BINS).fill(null));
+    if (!sums[h]) continue;
+    for (let column = 0; column < A1_AGE_BINS; column++) {
+      if (counts[h][column]) cells[h][column] = sums[h][column] / counts[h][column];
+    }
+  }
+  return { cells: cells, counts: counts, farthest: farthest, maxAge: maxAge,
+           clipped: horizon.clipped, total: horizon.total };
+}
+
+/* ------------------------------------------------------------------ chrome --- */
+let chosenFollowed = null, chosenObject = null, objectPinned = false;
+const showTable = {};
+/* Hover position per panel, in CSS pixels inside the plot. An HTML chart *is*
+   interactive; a reader who can see a shape and not read a value off it has to
+   go to the table for every question, which is what the crosshair is for. */
+const hover = {};
+
+function buildPanels() {
+  for (const id of ["sim-wide", "sim", "scoped-wide", "scoped"])
+    $("panels-" + id).innerHTML = "";
+  for (const spec of panels) {
+    const host = $("panels-" + (spec.scoped ? "scoped" : "sim") +
+                   (spec.feature ? "-wide" : ""));
+    const box = document.createElement("div");
+    box.className = spec.feature ? "panel feature" : "panel";
+    box.innerHTML =
+      '<div class="phead"><span class="ptitle">' + spec.title + "</span>" +
+      '<span class="pnote" id="note-' + spec.id + '"></span>' +
+      '<button class="tog" id="help-' + spec.id + '">?</button>' +
+      '<button class="tog" id="tog-' + spec.id + '">table</button></div>' +
+      '<div class="pdesc" id="desc-' + spec.id + '" hidden>' + (spec.help || "") + "</div>" +
+      '<div class="plot" id="plot-' + spec.id + '">' +
+      '<canvas id="cv-' + spec.id + '"></canvas>' +
+      '<div class="tip" id="tip-' + spec.id + '" hidden></div></div>' +
+      '<div class="tbl" id="tbl-' + spec.id + '" hidden></div>' +
+      '<div class="legend" id="leg-' + spec.id + '"></div>';
+    host.appendChild(box);
+    (function (id) {
+      const plot = $("plot-" + id);
+      plot.onmousemove = function (event) {
+        const box = plot.getBoundingClientRect();
+        hover[id] = { x: event.clientX - box.left, y: event.clientY - box.top };
+      };
+      plot.onmouseleave = function () { hover[id] = null; };
+      $("help-" + id).onclick = function () {
+        $("desc-" + id).hidden = !$("desc-" + id).hidden;
+      };
+      $("tog-" + id).onclick = function () {
+        showTable[id] = !showTable[id];
+        $("plot-" + id).hidden = !!showTable[id];
+        $("tbl-" + id).hidden = !showTable[id];
+        $("tog-" + id).textContent = showTable[id] ? "chart" : "table";
+      };
+    })(spec.id);
+  }
+}
+
+function renderTable(spec) {
+  const rows = spec.table ? spec.table() : [];
+  const host = $("tbl-" + spec.id);
+  if (rows.length < 2) { host.textContent = "no data yet"; return; }
+  const head = rows[0].map(cell => "<th>" + cell + "</th>").join("");
+  const body = rows.slice(1).map(row =>
+    "<tr>" + row.map(cell => "<td>" + cell + "</td>").join("") + "</tr>").join("");
+  host.innerHTML = "<table><thead><tr>" + head + "</tr></thead><tbody>" +
+    body + "</tbody></table>";
+}
+
+function drawPanels() {
+  for (const spec of panels) {
+    const noteHost = $("note-" + spec.id);
+    const off = spec.disabled ? spec.disabled() : false;
+    noteHost.textContent = spec.note ? spec.note() : "";
+    noteHost.className = off ? "pnote warn" : "pnote";
+    const legendHost = $("leg-" + spec.id);
+    if (spec.legend && !off) {
+      legendHost.innerHTML = spec.legend().map(pair =>
+        '<span><span class="sw" style="background:' + pair[1] + '"></span>' +
+        pair[0] + "</span>").join("");
+    } else {
+      legendHost.innerHTML = "";
+    }
+    if (showTable[spec.id]) { renderTable(spec); continue; }
+    const g = surface($("cv-" + spec.id));
+    if (off) {
+      g.ctx.fillStyle = css("--ink2"); g.ctx.font = "11px system-ui";
+      g.ctx.textAlign = "center";
+      g.ctx.fillText("see the note above", g.w / 2, g.h / 2);
+      continue;
+    }
+    spec.draw(g);
+    if (spec.timeAxis) scopeMarks(g);
+    crosshair(spec, g);
+  }
+}
+
+/* The selected object placed on the network's clock: where it was born and,
+   when its transaction is followed, when it settled. Two verticals, not a
+   series -- a network-wide panel has no per-object value to draw, and these
+   are the only two instants the trace actually records for one object. */
+function scopeMarks(g) {
+  const object = selectedObject();
+  if (!object) return;
+  const span = Math.max(state.observedThrough, 1);
+  const marks = [[object.born, "object " + object.id + " born", css("--s1")]];
+  const settled = object.tx === undefined ? undefined : state.settledAt.get(object.tx);
+  if (settled !== undefined) marks.push([settled, "settled", css("--ink")]);
+  const ctx = g.ctx;
+  ctx.save();
+  ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.font = "9px system-ui";
+  for (const mark of marks) {
+    const x = xy(g, mark[0] / span, 0, 1)[0];
+    ctx.strokeStyle = mark[2]; ctx.fillStyle = mark[2];
+    ctx.beginPath(); ctx.moveTo(x, g.pad.t); ctx.lineTo(x, g.h - g.pad.b); ctx.stroke();
+    // Label to the right of the line unless that would run off the plot.
+    const width = ctx.measureText(mark[1]).width;
+    const flip = x + 3 + width > g.w - g.pad.r;
+    ctx.textAlign = flip ? "right" : "left";
+    ctx.fillText(mark[1], flip ? x - 3 : x + 3, g.pad.t + 8);
+  }
+  ctx.restore();
+}
+
+/* Drawn after the panel, so it is over the marks rather than under them. The
+   readout comes from the same reducer the panel drew from -- a tooltip computed
+   another way could disagree with the line it is pointing at. */
+function crosshair(spec, g) {
+  const tip = $("tip-" + spec.id);
+  const at = hover[spec.id];
+  if (!at || !spec.readAt) { tip.hidden = true; return; }
+  const inside = at.x >= g.pad.l && at.x <= g.w - g.pad.r &&
+                 at.y >= g.pad.t && at.y <= g.h - g.pad.b;
+  if (!inside) { tip.hidden = true; return; }
+  const fraction = (at.x - g.pad.l) / (g.w - g.pad.l - g.pad.r);
+  const reading = spec.readAt(fraction);
+  if (!reading) { tip.hidden = true; return; }
+  const ctx = g.ctx;
+  ctx.strokeStyle = css("--ink2");
+  ctx.globalAlpha = 0.45;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(at.x, g.pad.t);
+  ctx.lineTo(at.x, g.h - g.pad.b);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  tip.hidden = false;
+  tip.innerHTML = reading.join("<br>");
+  // Flip to the left of the pointer near the right edge, so it stays readable.
+  const width = tip.offsetWidth || 120;
+  const left = at.x + width + 14 > g.w ? at.x - width - 10 : at.x + 10;
+  tip.style.left = Math.max(2, left) + "px";
+  tip.style.top = Math.max(2, Math.min(at.y + 8, g.h - 44)) + "px";
+}
+
+/* Nearest sample at or before a fraction of the x-axis. Nearest rather than
+   interpolated: these are samples of a stepwise reality, and inventing a value
+   between two boundaries would be a value the run never had. */
+function sampleAt(series, fraction, timeOf) {
+  if (!series.length) return null;
+  const span = Math.max(state.observedThrough, 1);
+  const target = fraction * span;
+  let best = null;
+  for (const point of series) {
+    const t = timeOf ? timeOf(point) : point.t;
+    if (t <= target || best === null) best = point;
+    if (t > target) break;
+  }
+  return best;
+}
+
+function tiles() {
+  /* No mean-propagation tile. The previous viewer averaged every admission seen
+     so far, mixing objects born seconds apart -- the same confound that had to be
+     removed from bench/propagation.py. The honest form of that question is the
+     residency-and-reach panel, where age is on the axis. */
+  const observed = state.finished === null
+    ? (state.observedThrough / 1000).toFixed(1) + "s so far"
+    : "finalised: " + state.finished;
+  /* `-1` means the model cannot express stale work under instant notification.
+     An absence, not a zero -- and note `-1 || 0` is `-1`, so the obvious guard
+     does not launder it. */
+  const stale = state.staleAvailable ? String(state.staleMax) : "n/a";
+  const rows = [
+    ["txs included", state.included],
+    ["wrappers emitted", state.wrappers],
+    ["messages dropped", state.drops.total],
+    ["stale deps proved", stale],
+    ["objects tracked", state.objects.size],
+    ["observed", observed],
+  ];
+  $("tiles").innerHTML = rows.map(row =>
+    '<div class="tile"><div class="v">' + row[1] + '</div><div class="k">' +
+    row[0] + "</div></div>").join("");
+}
+
+/* The block that settled the followed transaction: the latest block built
+   no later than the transaction's first `settled` transition. Exact when the
+   proposer is traced, which is every trace these panels accept. */
+function settlingBlock() {
+  const tx = selectedFollowed();
+  const settled = tx === null ? undefined : state.settledAt.get(tx);
+  if (settled === undefined || focusedSubset()) return null;
+  let found = null;
+  for (const block of state.blocks) if (block.t <= settled) found = block;
+  return found;
+}
+
+function blocksRibbon() {
+  const shown = state.blocks.slice(-8);
+  const settling = settlingBlock();
+  $("blkrow").innerHTML = shown.map(function (block, index) {
+    const share = clamp01(block.wasted / Math.max(block.txs + block.wasted, 1));
+    const settles = block === settling;
+    return '<div class="blk' + (index === shown.length - 1 ? " newest" : "") +
+      (settles ? " settles" : "") +
+      '" title="proposer ' + block.proposer + " · " + block.wasted +
+      ' already-settled deps selected' +
+      (settles ? " · settled followed tx " + selectedFollowed() : "") + '">' +
+      '<div class="n">block ' + block.slot + " · by " + block.proposer + "</div>" +
+      '<div class="t">' + (block.txs || "—") + "</div>" +
+      '<div class="n">' + block.objs + " object" +
+      (block.objs === 1 ? "" : "s") + "</div>" +
+      '<div class="w"><i style="width:' + (share * 100).toFixed(0) +
+      '%"></i></div></div>';
+  }).join("");
+}
+
+/* The lists behind the selects, for the step buttons. */
+const selectorLists = {};
+function selectors() {
+  const fill = function (id, values, chosen, prefix) {
+    const select = $(id);
+    selectorLists[id] = values;
+    /* A select that is open or focused is left alone: the list behind it
+       grows with every birth during a replay, and rewriting the options under
+       an open dropdown is what made it impossible to pick from. */
+    if (document.activeElement === select) return;
+    const wanted = values.join(",");
+    if (select.dataset.filled !== wanted) {
+      select.dataset.filled = wanted;
+      select.innerHTML = values.map(v =>
+        '<option value="' + v + '">' + prefix + v + "</option>").join("");
+    }
+    /* The selection can move without the reader touching this select --
+       following a transaction picks its object -- so the value is kept in
+       step every frame, touched only when it differs. */
+    if (chosen !== null && values.indexOf(chosen) >= 0 &&
+        select.value !== String(chosen))
+      select.value = String(chosen);
+  };
+  const followed = Array.from(state.knowledgeBins.keys()).sort((a, b) => a - b);
+  fill("followed", followed, chosenFollowed, "tx ");
+  fill("netfollowed", followed, chosenFollowed, "tx ");
+  const objects = Array.from(state.objects.keys()).slice(-500);
+  if (chosenObject !== null && state.objects.has(chosenObject) &&
+      objects.indexOf(chosenObject) < 0)
+    objects.unshift(chosenObject);
+  fill("object", objects, chosenObject, "object ");
+  const nodes = [];
+  for (let node = 0; node < state.nodeCount; node++) nodes.push(node);
+  fill("netref", nodes, netRef, "node ");
+  $("scopenote").textContent = scopeNote();
+  ticker();
+}
+
+/* The last eight followed transactions born so far, oldest first, with what
+   became of each: still spreading, settled, or gone from every view. */
+let tickerKey = "";
+function ticker() {
+  const born = [];
+  for (const tx of state.knowledgeBins.keys()) {
+    const at = state.txBorn.get(tx);
+    if (at !== undefined && at <= player.simT) born.push([at, tx]);
+  }
+  born.sort((a, b) => a[0] - b[0]);
+  const active = selectedFollowed();
+  const chips = born.slice(-8).map(pair => {
+    const tx = pair[1];
+    const glyph = state.settledAt.has(tx) ? "✓" : txDone(tx) ? "×" : "●";
+    return [tx, glyph, tx === active];
+  });
+  const key = chips.map(c => c.join(":")).join(",");
+  if (key === tickerKey) return;
+  tickerKey = key;
+  $("txticker").innerHTML = chips.map(c =>
+    '<span class="chip' + (c[2] ? " on" : "") + '" data-tx="' + c[0] +
+    '" title="' + (c[1] === "✓" ? "settled" : c[1] === "×" ? "gone from every view"
+                   : "spreading") + '">' + c[1] + " tx " + c[0] + "</span>").join("");
+}
+
+/* One sentence for the section, so a2 and f do not each explain the same
+   absence, and so the reader knows whether the object and the transaction
+   under the bar are the same thing. */
+function scopeNote() {
+  if (focusedSubset())
+    return "unavailable: these panels need every node, and this trace has a focus subset";
+  const parts = [];
+  if (!state.knowledgeBins.size)
+    parts.push("no transactions followed — pass trace_follow_rate or trace_follow");
+  const object = selectedObject();
+  if (object)
+    parts.push("object " + object.id + (object.tx === undefined
+      ? " is an aggregate, not one transaction" : " is tx " + object.tx + "'s own proof"));
+  return parts.join(" · ");
+}
+
+function hud() {
+  const cfg = feed.cfg;
+  if (cfg) {
+    const inSlot = player.simT % cfg.slot_length;
+    $("tickfill").style.width = (100 * inSlot / cfg.slot_length).toFixed(1) + "%";
+    $("ticklabel").textContent = "slot " +
+      Math.floor(player.simT / cfg.slot_length) + " · " +
+      (inSlot / 1000).toFixed(2) + "s · sim t = " +
+      (player.simT / 1000).toFixed(1) + "s";
+  }
+  state.boundaryFlash = Math.max(0, state.boundaryFlash - 0.03);
+  $("ticker").classList.toggle("boundary", state.boundaryFlash > 0);
+  const last = state.segments[state.segments.length - 1];
+  const segments = last
+    ? " · " + state.segments.length + " segment(s), last ended " + last.why
+    : "";
+  /* Absence of a terminal record is genuinely ambiguous, and saying so is the
+     point: a killed process emits nothing, so this cannot be narrowed. */
+  const terminal = state.finished === null
+    ? " · not finalised: still running, idle, crashed or killed — the trace cannot distinguish these"
+    : " · finalised (" + state.finished + ")";
+  $("status").textContent = feed.events.length + " events · " + feed.offset +
+    " bytes · " + feed.note + " · last poll " + feed.lastPoll +
+    segments + terminal;
+}
+
+$("play").onclick = function () {
   player.playing = !player.playing;
   $("play").textContent = player.playing ? "⏸ pause" : "⏵ play";
 };
-$("restart").onclick = () => {
-  player.hardReset(); player.playing = true;
-  $("play").textContent = "⏸ pause";
+$("restart").onclick = function () {
+  player.hardReset(); player.playing = true; $("play").textContent = "⏸ pause";
 };
-$("info").onclick = () => {
-  const p = $("infopanel");
-  p.hidden = !p.hidden;
-  $("info").classList.toggle("on", !p.hidden);
+const SPEEDS = [0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128];
+$("speed").oninput = function () {
+  player.speed = SPEEDS[parseInt($("speed").value, 10)];
+  $("speedv").textContent = player.speed + "×";
 };
-const SPEED_STEPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128];
-$("speed").oninput = () => {
-  player.speed = SPEED_STEPS[parseInt($("speed").value, 10)];
-  $("speedv").textContent = String(player.speed) + "×";
-};
-let shownAggregators = 1;
-const MAX_SHOWN_AGGREGATORS = 5;   // one identity color per drawn aggregator
-function updateShownAggregators(delta) {
-  const cap = Math.min(MAX_SHOWN_AGGREGATORS, feed.cfg ? feed.cfg.n : MAX_SHOWN_AGGREGATORS);
-  shownAggregators = Math.max(1, Math.min(cap, shownAggregators + delta));
+/* One selection, two selects: the timeline's section bar and the network
+   bar both offer the followed transaction, because it colours the network
+   view as well as scoping the knowledge panel. */
+function chooseFollowed(tx) {
+  chosenFollowed = tx;
+  $("followed").value = String(tx);
+  $("netfollowed").value = String(tx);
+  /* Following a transaction selects its own proof object as well, so the
+     section describes one thing, until the reader picks an object by hand. */
+  if (objectPinned) return;
+  for (const record of state.objects.values()) {
+    if (record.tx === tx) { chosenObject = record.id; break; }
+  }
 }
-$("more_aggregators").onclick = () => updateShownAggregators(+1);
-$("fewer_aggregators").onclick = () => updateShownAggregators(-1);
+$("followed").onchange = function () {
+  pinFollow();
+  chooseFollowed(parseInt($("followed").value, 10));
+  $("followed").blur();
+};
+$("netfollowed").onchange = function () {
+  pinFollow();
+  chooseFollowed(parseInt($("netfollowed").value, 10));
+  $("netfollowed").blur();
+};
+$("follow").onchange = function () { setFollowMode($("follow").value); };
+$("netfollow").onchange = function () { setFollowMode($("netfollow").value); };
+$("slots").onchange = function () { setFollowSlots($("slots").value); };
+$("netslots").onchange = function () { setFollowSlots($("netslots").value); };
+$("txticker").onclick = function (event) {
+  const tx = event.target.dataset ? event.target.dataset.tx : undefined;
+  if (tx === undefined) return;
+  pinFollow();
+  chooseFollowed(parseInt(tx, 10));
+};
+/* Step through a list without opening it: the neighbour of the current
+   choice in the list the select was last filled from. */
+function stepSelector(id, delta, apply) {
+  const values = selectorLists[id] || [];
+  const current = parseInt($(id).value, 10);
+  let index = values.indexOf(current);
+  if (index < 0) index = delta > 0 ? -1 : values.length;
+  const next = values[Math.max(0, Math.min(values.length - 1, index + delta))];
+  if (next !== undefined && next !== current) apply(next);
+}
+const pinAndChoose = tx => { pinFollow(); chooseFollowed(tx); };
+for (const id of ["followed", "netfollowed"]) {
+  $(id + "-prev").onclick = () => stepSelector(id, -1, pinAndChoose);
+  $(id + "-next").onclick = () => stepSelector(id, 1, pinAndChoose);
+}
+$("object-prev").onclick = () => stepSelector("object", -1, chooseObject);
+$("object-next").onclick = () => stepSelector("object", 1, chooseObject);
+function chooseObject(id) {
+  chosenObject = id;
+  objectPinned = true;
+  $("object").value = String(id);
+}
+$("object").onchange = function () {
+  chooseObject(parseInt($("object").value, 10));
+  $("object").blur();
+};
+$("theme").onclick = function () {
+  const root = document.documentElement;
+  const current = root.getAttribute("data-theme");
+  const isDark = current === "dark" || (!current &&
+    matchMedia("(prefers-color-scheme: dark)").matches);
+  root.setAttribute("data-theme", isDark ? "light" : "dark");
+};
 
-// ---------------------------------------------------------------- pool canvas
-const canvas = $("pool"), ctx = canvas.getContext("2d");
-const css = getComputedStyle(document.documentElement);
-const C = name => css.getPropertyValue(name).trim();
-const spriteColor = i => C("--aggregator" + i) || C("--agg");
-let spriteCenters = [];   // agg id -> {x, y, side} in canvas coordinates
-function bandHeader(label, x0, y0, x1) {
-  ctx.fillStyle = C("--ink2"); ctx.font = "10px system-ui"; ctx.textAlign = "left";
-  ctx.fillText(label, x0, y0 - 8);
-  ctx.strokeStyle = C("--grid"); ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(x0 + 8 + ctx.measureText(label).width, y0 - 11);
-  ctx.lineTo(x1, y0 - 11);
-  ctx.stroke();
-}
-function layoutBand(items, label, x0, y0, x1, yMax) {
-  bandHeader(label, x0, y0, x1);
-  let x = x0, y = y0, rowH = 0, hidden = 0;
-  for (const it of items) {
-    // footprint from the size at birth: a ghosting item drains its fill in
-    // place instead of shrinking and reshuffling the band
-    const basis = it.bornSize !== undefined ? it.bornSize : it.size;
-    const rad = Math.max(5, Math.min(46, 4.5 * Math.sqrt(Math.max(basis, 0.9))));
-    if (x + 2 * rad > x1) { x = x0; y += rowH + 18; rowH = 0; }
-    if (y + 2 * rad > yMax) { it.visible = false; hidden += 1; continue; }
-    it.visible = true;
-    it.tx = x + rad; it.ty = y + rad; rowH = Math.max(rowH, 2 * rad);
-    x += 2 * rad + 10;
-    if (it.x === undefined || it.y === undefined) { it.x = it.tx; it.y = it.ty; }
-    it.x += (it.tx - it.x) * 0.18; it.y += (it.ty - it.y) * 0.18;   // ease
-    it.rad = rad;
-  }
-  if (hidden) {
-    ctx.fillStyle = C("--ink2"); ctx.font = "11px system-ui"; ctx.textAlign = "left";
-    ctx.fillText(`… +${hidden} more (band overflows, backlog growing)`, x0, yMax - 2);
-  }
-}
-function drawAggregators(x0, y0, x1, y1) {
-  spriteCenters = [];
-  if (!feed.cfg || !feed.cfg.n) return;
-  const n = feed.cfg.n;
-  // draw a few examples: with round robin every aggregator behaves the
-  // same, and a fleet of sprites with 2 arrows each is unreadable
-  const shown = Math.min(shownAggregators, n);
-  // the band label + the -/+ buttons are the #aggregator_header HTML overlay;
-  // only the rule is drawn here, starting past it
-  ctx.strokeStyle = C("--grid"); ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(x0 + $("aggregator_header").offsetWidth + 8, y0 - 11);
-  ctx.lineTo(x1, y0 - 11);
-  ctx.stroke();
-  if (shown < n) {
-    ctx.fillStyle = C("--ink2"); ctx.font = "11px system-ui"; ctx.textAlign = "left";
-    ctx.fillText(`… plus ${n - shown} more just like ${shown > 1 ? "them" : "it"}, not drawn`,
-                 x0, y1 - 6);
-    y1 -= 18;
-  }
-  const regionW = x1 - x0, regionH = y1 - y0;
-  // single column: vertically separated origins keep the arrows apart
-  const cols = 1, rows = shown;
-  const cellW = regionW / cols, cellH = regionH / rows;
-  const side = Math.max(10, Math.min(64, cellW - 8, cellH - 16));
-  for (let i = 0; i < shown; i++) {
-    const cx = x0 + (i % cols) * cellW + cellW / 2;
-    const cy = y0 + Math.floor(i / cols) * cellH + (cellH - 12) / 2;
-    const sx = cx - side / 2, sy = cy - side / 2;
-    spriteCenters[i] = { x: cx, y: cy, side };
-    const fold = state.folds[i];
-    ctx.strokeStyle = spriteColor(i); ctx.lineWidth = 1.5;
-    if (fold) {
-      // fill rises bottom-up over the fold's duration, draining on completion
-      const p = Math.max(0, Math.min(1, (player.simT - fold.start) / (fold.end - fold.start)));
-      roundRect(sx, sy, side, side, 4);
-      ctx.save(); ctx.clip();
-      ctx.fillStyle = spriteColor(i);
-      ctx.fillRect(sx, sy + side * (1 - p), side, side * p);
-      ctx.restore();
-      roundRect(sx, sy, side, side, 4); ctx.stroke();
-    } else {
-      // idle: hollow but still in its own color, so identity survives
-      ctx.globalAlpha = 0.5;
-      roundRect(sx, sy, side, side, 4); ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-    if (cellH - side >= 12) {
-      ctx.fillStyle = C("--ink2"); ctx.font = "10px system-ui"; ctx.textAlign = "center";
-      ctx.fillText(fold ? `${fold.as} ⊕ ${fold.bs} txs` : "idle", cx, sy + side + 12);
-    }
-  }
-}
-function drawArrows() {
-  // dashed arrows from the two items an aggregator is folding right now
-  // into its sprite
-  for (let i = 0; i < state.folds.length; i++) {
-    const fold = state.folds[i], sprite = spriteCenters[i];
-    if (!fold || !sprite) continue;
-    const p = Math.max(0, Math.min(1, (player.simT - fold.start) / (fold.end - fold.start)));
-    const ex = sprite.x + sprite.side / 2 + 2, ey = sprite.y;
-    for (const id of [fold.a, fold.b]) {
-      const it = state.items.get(id);
-      if (!it || it.x === undefined || !it.visible) continue;
-      const cx = (it.x + ex) / 2, cy = Math.max(it.y, ey) + 26;
-      ctx.globalAlpha = 0.3 + 0.5 * p;
-      ctx.strokeStyle = spriteColor(i); ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.moveTo(it.x, it.y);
-      ctx.quadraticCurveTo(cx, cy, ex, ey);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      // arrowhead at the sprite: inputs flow into the aggregator
-      const angle = Math.atan2(ey - cy, ex - cx);
-      ctx.beginPath();
-      ctx.moveTo(ex - 7 * Math.cos(angle - 0.45), ey - 7 * Math.sin(angle - 0.45));
-      ctx.lineTo(ex, ey);
-      ctx.lineTo(ex - 7 * Math.cos(angle + 0.45), ey - 7 * Math.sin(angle + 0.45));
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-  }
-}
-function drawPool() {
-  const wrap = $("poolwrap");
-  const w = wrap.clientWidth, h = wrap.clientHeight, dpr = devicePixelRatio || 1;
-  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-    canvas.width = w * dpr; canvas.height = h * dpr;
-  }
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
+/* ------------------------------------------------------- the network view ---
+   Not a force-directed graph: a random regular overlay has no geometry, so a
+   spring layout invents clusters that are artefacts of the algorithm and a
+   reader cannot tell those from structure. This is a **deterministic inspector
+   for small `N`** instead -- for topology sanity checks, disconnected
+   components, and finding the node that is dropping everything.
 
-  // left half: the aggregator fleet; right half, two bands: arrivals queue
-  // on top (oldest left), aggregates below (biggest first); a fresh
-  // aggregate glides from its aggregator's sprite over into the lower band
-  const splitX = Math.round(w / 2), midY = Math.round(h / 2);
-  ctx.strokeStyle = C("--grid"); ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(splitX, 12); ctx.lineTo(splitX, h - 12); ctx.stroke();
-  drawAggregators(14, 44, splitX - 14, h - 14);
-  const all = [...state.items.values()];
-  const raw = all.filter(i => i.kind !== "agg").sort((a, b) => a.id - b.id);
-  const aggs = all.filter(i => i.kind === "agg")
-                  .sort((a, b) => ((b.bornSize ?? b.size) - (a.bornSize ?? a.size))
-                               || (a.id - b.id));
-  layoutBand(raw, "unaggregated", splitX + 14, 44, w - 14, midY - 16);
-  layoutBand(aggs, "aggregates", splitX + 14, midY + 28, w - 14, h - 14);
-  drawArrows();
-  for (const it of raw) if (it.visible) drawItem(it, it.rad);
-  for (const it of aggs) if (it.visible) drawItem(it, it.rad);
-}
-function drawItem(it, rad) {
-  const x = it.x, y = it.y;
-  ctx.globalAlpha = it.locked ? 0.45 : 1;
-  const col = it.size === 0 ? C("--ghost")
-            : it.kind === "agg" ? C("--agg")
-            : it.kind === "pq" ? C("--pq") : C("--priv");
-  ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = 2;
-  const born = it.bornSize !== undefined ? it.bornSize : it.size;
-  if (it.kind === "agg") {
-    // merge-tree glyph: triangle sized by the useful txs it was born with,
-    // height hints at fold depth; the solid share (bottom-up) is what is
-    // still useful now -- later blocks ghost txs out of it and drain the
-    // fill; a ghost (nothing left pending) draws hollow. Proof size (tot)
-    // stays undrawable: merging overlapping aggregates (the overlap is
-    // re-proved) keeps it additive, so it grows exponentially and pins
-    // every triangle at the radius clamp.
-    const hh = rad * (1 + Math.min(1, it.depth / 12) * 0.5);
-    const top = y - hh, bot = y + rad * 0.8;
-    ctx.beginPath();
-    ctx.moveTo(x, top); ctx.lineTo(x - rad, bot); ctx.lineTo(x + rad, bot);
-    ctx.closePath();
-    ctx.stroke();
-    if (it.size > 0) {
-      // area-true fill height: for an apex-up triangle the bottom band of
-      // height fraction f holds area fraction 1-(1-f)^2, so invert
-      const f = 1 - Math.sqrt(Math.max(0, 1 - it.size / born));
-      const bandH = (bot - top) * f;
-      ctx.save(); ctx.clip();
-      ctx.fillRect(x - rad, bot - bandH, 2 * rad, bandH);
-      // inner "branch" lines to suggest the merge tree
-      if (rad > 10) {
-        ctx.beginPath(); ctx.rect(x - rad, bot - bandH, 2 * rad, bandH); ctx.clip();
-        ctx.strokeStyle = C("--surface"); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bot);
-        ctx.moveTo(x - rad / 2, y + rad * 0.15); ctx.lineTo(x, y - hh / 3);
-        ctx.lineTo(x + rad / 2, y + rad * 0.15);
-        ctx.stroke();
+   Two layouts, both deterministic, and the difference between them is whether
+   position means anything. Rings by hop distance: the radius is real, the angle
+   is arbitrary. Circle by node id: neither is meaningful, and it exists because
+   an arbitrary layout you can *see* is arbitrary beats one that looks
+   significant. Adjacency is carried by the edges in both, which is what makes
+   an arbitrary angle harmless here where it was not in panel F.
+
+   Disabled above a node count, because past a few hundred nodes this is a
+   hairball whatever the layout, and a picture that cannot be read is worse than
+   an honest refusal. */
+const NETWORK_MAX_NODES = 400;
+const NET_METRICS = [
+  { id: "egress", label: "egress utilisation",
+    value: st => st.egress, format: v => (v * 100).toFixed(0) + "%", top: () => 1 },
+  { id: "cpu", label: "cpu utilisation",
+    value: st => st.cpu, format: v => (v * 100).toFixed(0) + "%", top: () => 1 },
+  { id: "buffer", label: "send buffer fullness",
+    value: st => st.eqb, format: v => (v / 1e6).toFixed(2) + " MB",
+    top: () => (feed.cfg && feed.cfg.egress_queue_bytes > 0)
+      ? feed.cfg.egress_queue_bytes : null },
+  { id: "eq", label: "egress queue depth",
+    value: st => st.eq, format: v => String(v), top: () => null },
+  { id: "drops", label: "messages dropped",
+    value: st => st.dr, format: v => String(v), top: () => null },
+  { id: "held", label: "view size",
+    value: st => st.held, format: v => String(v), top: () => null },
+  { id: "knowledge", label: "knowledge of followed tx",
+    value: null, format: null, top: () => null },
+];
+let netMetric = "knowledge", netLayout = "ring", netRef = 0;
+let netHover = null, netPositions = [];
+let netSize = "held", netPinned = null, netScale = "ceiling", showDups = true;
+
+/* Where the ring layout is centred. Usually the chosen reference node -- but
+   when colouring by knowledge of a followed transaction, the only origin that
+   makes the picture mean anything is that transaction's entry node: radius is
+   then "how far the wave had to travel", and the wave visibly crosses rings. */
+function effectiveRef() {
+  if (netMetric === "knowledge") {
+    const tx = selectedFollowed();
+    if (tx !== null) {
+      for (const record of state.objects.values()) {
+        if (record.tx === tx && record.entry !== null) return record.entry;
       }
-      ctx.restore();
     }
-  } else if (it.kind === "pq") {
-    const s = rad * 1.6;
-    roundRect(x - s / 2, y - s / 2, s, s, 3);
-    it.size === 0 ? ctx.stroke() : ctx.fill();   // hollow = already included
-  } else {
-    ctx.beginPath(); ctx.arc(x, y, rad * 0.8, 0, 7);
-    it.size === 0 ? ctx.stroke() : ctx.fill();
   }
-  if (it.size >= 1 || it.tot >= 1) {
-    ctx.globalAlpha = 1; ctx.fillStyle = C("--ink2");
-    ctx.font = "10px system-ui"; ctx.textAlign = "center";
-    const label = it.kind !== "agg" ? (it.size === 0 ? "" : String(it.size))
-                : it.size < born ? `${it.size} of ${born}` : String(it.size);
-    if (label) ctx.fillText(label, x, y + rad + 12);
+  return netRef;
+}
+
+/* The node's drawn radius carries a second metric alongside its colour.
+   Square root, because a disc's perceived size is its area, not its radius --
+   linear radius makes middling values look tiny. Scaled against the largest
+   value present: neither channel has a natural ceiling. */
+function nodeRadiusScale() {
+  if (netSize === "uniform") return null;
+  let highest = 0;
+  for (const st of state.nodeState.values()) {
+    const value = netSize === "held" ? st.held : st.eqb;
+    if (value !== null && value !== undefined && value > highest) {
+      highest = value;
+    }
+  }
+  if (!highest) return null;
+  return function (node) {
+    const st = state.nodeState.get(node);
+    if (!st) return 0.55;
+    const value = netSize === "held" ? st.held : st.eqb;
+    if (value === null || value === undefined) return 0.55;
+    return 0.55 + 0.8 * Math.sqrt(value / highest);
+  };
+}
+
+function networkDisabledReason() {
+  if (!feed.cfg) return "no trace loaded yet";
+  if (feed.cfg.topology === "omitted")
+    return "topology omitted from this trace — too many edges to record";
+  if (focusedSubset())
+    return "a focused trace carries only some nodes; a whole-network picture " +
+           "would be missing the rest without saying so";
+  if (feed.cfg.nodes > NETWORK_MAX_NODES)
+    return feed.cfg.nodes + " nodes is past what any layout can render " +
+           "legibly (limit " + NETWORK_MAX_NODES + ")";
+  return null;
+}
+
+const TIMELINE_LAYOUTS = ["rows", "lanes"];
+function isTimeline() { return TIMELINE_LAYOUTS.indexOf(netLayout) >= 0; }
+
+/* The timeline layouts: x is the followed transaction's own clock, and a
+   node is placed at the moment it first came to know the transaction. Only
+   nodes that did are placed; the rest are not yet part of the story. `rows`
+   gives each such node a row, in the order they learned, so the picture is
+   a sequence diagram; `lanes` lays the rings flat, one lane per hop from
+   the entry, so the wave reads as arrows climbing lane to lane. */
+function timelineX(g, clock, t) {
+  return g.pad.l + Math.max(0, Math.min(1, (t - clock.born) / clock.span)) *
+         (g.w - g.pad.l - g.pad.r);
+}
+function firstKnowing(tx) {
+  const history = state.classHistory.get(tx);
+  const first = [];
+  if (!history) return first;
+  for (const [node, entries] of history) first.push([entries[0][0], node]);
+  first.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  return first;
+}
+function layoutTimeline(g, positions) {
+  const tx = selectedFollowed();
+  if (tx === null) return positions;
+  const clock = txClock(tx);
+  const first = firstKnowing(tx);
+  const top = g.pad.t + 8, bottom = g.h - g.pad.b - 22;
+  if (netLayout === "rows") {
+    const rowH = (bottom - top) / Math.max(1, first.length);
+    first.forEach(function (pair, index) {
+      positions[pair[1]] = [timelineX(g, clock, pair[0]), top + (index + 0.5) * rowH];
+    });
+    return positions;
+  }
+  const entry = spreadEntry(tx);
+  const distance = entry === null ? null : hopDistancesFrom(entry);
+  if (!distance) return positions;
+  let farthest = 0;
+  for (const hops of distance.values()) if (hops > farthest) farthest = hops;
+  const laneH = (bottom - top) / (farthest + 1);
+  const seen = new Map();
+  for (const pair of first) {
+    const node = pair[1];
+    const hops = distance.has(node) ? distance.get(node) : farthest;
+    // Arrivals into one lane are staggered a little, so two nodes learning
+    // in the same instant do not become one dot.
+    const nth = seen.get(hops) || 0;
+    seen.set(hops, nth + 1);
+    const offset = ((nth % 5) - 2) * Math.min(6, laneH / 6);
+    positions[node] = [timelineX(g, clock, pair[0]),
+                       top + (hops + 0.5) * laneH + offset];
+  }
+  return positions;
+}
+function spreadEntry(tx) {
+  for (const record of state.objects.values()) {
+    if (record.tx === tx && record.entry !== null) return record.entry;
+  }
+  return null;
+}
+
+function layoutNodes(g) {
+  const count = state.nodeCount;
+  const positions = new Array(count);
+  if (isTimeline()) return layoutTimeline(g, positions);
+  const cx = (g.pad.l + g.w - g.pad.r) / 2;
+  const cy = (g.pad.t + g.h - g.pad.b) / 2;
+  const span = Math.min(g.w - g.pad.l - g.pad.r, g.h - g.pad.t - g.pad.b);
+  const outer = span / 2 - 16;
+  if (netLayout === "circle") {
+    for (let node = 0; node < count; node++) {
+      const angle = 2 * Math.PI * node / Math.max(1, count) - Math.PI / 2;
+      positions[node] = [cx + outer * Math.cos(angle),
+                         cy + outer * Math.sin(angle)];
+    }
+    return positions;
+  }
+  const distance = hopDistancesFrom(effectiveRef());
+  if (!distance) return positions;
+  let maxHops = 0;
+  const byHop = new Map();
+  for (let node = 0; node < count; node++) {
+    const hops = distance.has(node) ? distance.get(node) : -1;
+    if (hops > maxHops) maxHops = hops;
+    if (!byHop.has(hops)) byHop.set(hops, []);
+    byHop.get(hops).push(node);
+  }
+  for (const entry of byHop) {
+    const hops = entry[0], members = entry[1];
+    // Unreachable nodes get the outermost ring rather than being hidden: a
+    // disconnected component is exactly what this view is for finding.
+    const ratio = hops < 0 ? 1 : (maxHops ? hops / maxHops : 0);
+    const radius = ratio * outer;
+    members.forEach(function (node, index) {
+      const angle = 2 * Math.PI * index / members.length - Math.PI / 2;
+      positions[node] = hops === 0
+        ? [cx, cy]
+        : [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)];
+    });
+  }
+  return positions;
+}
+
+function hopDistancesFrom(origin) {
+  const neighbours = adjacency();
+  if (!neighbours) return null;
+  const distance = new Map([[origin, 0]]);
+  let frontier = [origin];
+  while (frontier.length) {
+    const following = [];
+    for (const node of frontier) {
+      for (const peer of neighbours.get(node) || []) {
+        if (!distance.has(peer)) {
+          distance.set(peer, distance.get(node) + 1);
+          following.push(peer);
+        }
+      }
+    }
+    frontier = following;
+  }
+  return distance;
+}
+
+function metricSpec() {
+  for (const spec of NET_METRICS) {
+    if (spec.id === netMetric) return spec;
+  }
+  return NET_METRICS[0];
+}
+
+function nodeColour(node, spec, top) {
+  if (spec.id === "knowledge") {
+    const tx = selectedFollowed();
+    const byNode = tx === null ? null : state.knowledge.get(tx);
+    const klass = byNode ? byNode.get(node) : undefined;
+    return css(KNOWLEDGE_COLOUR[klass || "none"]);
+  }
+  const st = state.nodeState.get(node);
+  if (!st) return css("--ghost");
+  const raw = spec.value(st);
+  if (raw === null || raw === undefined) return css("--ghost");
+  if (top) return heatColour(clamp01(raw / top));
+  // No natural ceiling, or the reader asked for none: scale against the largest
+  // value present rather than inventing one -- and say so in the legend.
+  let highest = 0;
+  for (const other of state.nodeState.values()) {
+    const value = spec.value(other);
+    if (value !== null && value !== undefined && value > highest) highest = value;
+  }
+  return heatColour(highest ? clamp01(raw / highest) : 0);
+}
+
+function drawNetwork() {
+  const canvas = $("netcv");
+  const g = surface(canvas);
+  const reason = networkDisabledReason();
+  $("netnote").textContent = reason ? "" : timelineNote() ||
+    (netLayout === "ring"
+      ? "radius is hop distance from node " + effectiveRef()
+        + (effectiveRef() !== netRef ? " (the followed tx's entry)" : "")
+        + "; angle is arbitrary — ripples are admissions"
+      : "position carries no meaning at all — the edges carry adjacency; "
+        + "ripples are admissions");
+  if (reason) {
+    g.ctx.fillStyle = css("--ink2");
+    g.ctx.font = "12px system-ui";
+    g.ctx.textAlign = "center";
+    g.ctx.fillText(reason, g.w / 2, g.h / 2);
+    $("netlegend").innerHTML = "";
+    return;
+  }
+  netPositions = layoutNodes(g);
+  const ctx = g.ctx;
+  const origin = effectiveRef();
+  // The reference selector only steers the layout while the layout is not
+  // already anchored by the followed transaction's entry.
+  $("netref").disabled = origin !== netRef;
+  const neighbours = adjacency();
+  if (isTimeline()) {
+    drawTimelineFrame(g);
+  } else {
+    // Edges first and faint: they are context, and they are also what makes
+    // an arbitrary angular position harmless -- adjacency is drawn, not
+    // implied. Not on a timeline, where position is time and a link between
+    // two moments would mean nothing.
+    ctx.strokeStyle = css("--grid");
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const edge of feed.cfg.topology) {
+      const from = netPositions[edge[0]], to = netPositions[edge[1]];
+      if (!from || !to) continue;
+      ctx.moveTo(from[0], from[1]);
+      ctx.lineTo(to[0], to[1]);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  const spec = metricSpec();
+  const top = spec.top && netScale === "ceiling" ? spec.top() : null;
+  const radius = state.nodeCount > 120 ? 4 : state.nodeCount > 60 ? 6 : 9;
+  if (spec.id === "knowledge") drawSpread(g, radius);
+  const scaleOf = nodeRadiusScale();
+  for (let node = 0; node < state.nodeCount; node++) {
+    const at = netPositions[node];
+    if (!at) continue;
+    const r = scaleOf ? radius * scaleOf(node) : radius;
+    ctx.fillStyle = nodeColour(node, spec, top);
+    ctx.beginPath();
+    ctx.arc(at[0], at[1], r, 0, 6.2832);
+    ctx.fill();
+    ctx.strokeStyle = css("--grid");
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    if ((node === origin && netLayout === "ring") || node === netPinned ||
+        (isTimeline() && node === spreadEntry(selectedFollowed()))) {
+      ctx.strokeStyle = css("--flash");
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(at[0], at[1], r + 3, 0, 6.2832);
+      ctx.stroke();
+    }
+  }
+  // Admission ripples: an expanding, fading ring at every node that admitted
+  // something recently. Age is replay time, so the wave is a property of the
+  // run -- pause freezes it, speed scales it, and a fast-forward collapses it
+  // into a shimmer rather than inventing motion that never happened.
+  for (const flash of state.netFlashes) {
+    const age = (player.simT - flash.t) / NET_FLASH_MS;
+    if (age < 0 || age > 1) continue;
+    const at = netPositions[flash.node];
+    if (!at) continue;
+    ctx.strokeStyle = css("--flash");
+    ctx.globalAlpha = 0.85 * (1 - age);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(at[0], at[1], radius + 2 + age * 16, 0, 6.2832);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  networkLegend(spec, top);
+  networkTooltip(g, spec);
+  networkPin();
+}
+
+/* How the followed transaction spread: an edge from the peer that delivered
+   the evidence to each node, at the moment of that node's first attributed
+   transition, coloured by the form the evidence took. Drawn under the nodes
+   and over the adjacency, on the replay clock like the ripples. Only the
+   first attribution per node -- a later delivery of the same transaction
+   changes nothing the node knows, so it is not an edge. */
+const SPREAD_FORMS = [["object", "own object", "--sp-object"],
+                      ["wrapper", "wrapper", "--sp-wrapper"],
+                      ["announce", "announcement", "--sp-announce"],
+                      ["block", "block notice", "--ink2"]];
+function spreadAvailable() {
+  return !!(feed.cfg && feed.cfg.trace_schema >= 2);
+}
+function spreadColour(form) {
+  for (const entry of SPREAD_FORMS) if (entry[0] === form) return css(entry[2]);
+  return css("--ink2");
+}
+function spreadSummary(tx) {
+  const tree = tx === null ? null : state.spread.get(tx);
+  if (!tree) return "";
+  const counts = {};
+  for (const edge of tree.values())
+    if (edge) counts[edge.form] = (counts[edge.form] || 0) + 1;
+  return " · learned by " + SPREAD_FORMS.filter(f => counts[f[0]])
+    .map(f => counts[f[0]] + " via " + f[1]).join(", ");
+}
+function dupsAvailable() {
+  return !!(feed.cfg && feed.cfg.trace_schema >= 3);
+}
+function dupSummary(tx) {
+  const list = tx === null ? null : state.dups.get(tx);
+  if (!list) return "";
+  let bytes = 0, count = 0;
+  for (const dup of list) {
+    if (dup.t > player.simT) break;
+    count += 1; bytes += dup.b;
+  }
+  return count ? " · " + count + " duplicate deliveries, " +
+    (bytes / 1e6).toFixed(1) + " MB" : "";
+}
+/* Every delivery of the followed transaction that taught its receiver
+   nothing, as a thin red arrow from the peer to the node. On the network
+   page it flares at its moment and fades over a second, since a flood of
+   them held forever would bury the tree; on the transaction page it stands
+   at its time for good, because there the time is the picture. Drawn under
+   the tree, so what was achieved stays on top of what it cost. */
+function drawDuplicates(g, radius) {
+  if (!showDups) return;
+  const tx = selectedFollowed();
+  const list = tx === null ? null : state.dups.get(tx);
+  if (!list) return;
+  const ctx = g.ctx;
+  const clock = isTimeline() ? txClock(tx) : null;
+  ctx.strokeStyle = ctx.fillStyle = css("--dup");
+  ctx.lineWidth = 1.2;
+  for (const dup of list) {
+    if (dup.t > player.simT) break;
+    const age = (player.simT - dup.t) / 1000;
+    if (!clock && age > 1) continue;
+    let from = netPositions[dup.peer], to = netPositions[dup.n];
+    if (!from || !to) continue;
+    if (clock) {
+      const x = timelineX(g, clock, dup.t) + ((dup.n % 5) - 2) * 2;
+      from = [x, from[1]]; to = [x, to[1]];
+    }
+    ctx.globalAlpha = clock ? 0.35 + 0.45 * Math.max(0, 1 - age) : 0.8 * (1 - age);
+    const dx = to[0] - from[0], dy = to[1] - from[1];
+    const length = Math.hypot(dx, dy) || 1;
+    const ux = dx / length, uy = dy / length;
+    // Offset a little to the side of the tree's own edge on the same link,
+    // so the two do not lie on top of each other.
+    const ox = -uy * 3, oy = ux * 3;
+    const tipX = to[0] - ux * (radius + 2) + ox, tipY = to[1] - uy * (radius + 2) + oy;
+    ctx.beginPath();
+    ctx.moveTo(from[0] + ux * (radius + 2) + ox, from[1] + uy * (radius + 2) + oy);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(tipX - ux * 5 - uy * 3, tipY - uy * 5 + ux * 3);
+    ctx.lineTo(tipX - ux * 5 + uy * 3, tipY - uy * 5 - ux * 3);
+    ctx.closePath();
+    ctx.fill();
   }
   ctx.globalAlpha = 1;
 }
-function roundRect(x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
-}
 
-// ---------------------------------------------------------------- block ribbon
-let blkCount = -1;
-function drawBlocks() {
-  if (state.blocks.length === blkCount) return;
-  blkCount = state.blocks.length;
-  const row = $("blkrow");
-  row.innerHTML = "";
-  const NAME = { agg: "agg", priv: "tx", pq: "sig" };
-  const shown = state.blocks.slice(-8);
-  shown.forEach((b, i) => {
-    const total = b.priv + b.pq;
-    const d = document.createElement("div");
-    d.className = "blk" + (total === 0 ? " empty" : "") +
-                  (i === shown.length - 1 ? " newest" : "");
-    let starks = "", tip = "nothing includable this slot";
-    if (b.parts && b.parts.length) {
-      const counts = b.parts.map(p => p.n == null ? "?" : p.n).join(" ⊕ ");
-      const names = b.parts.map(p =>
-        `${NAME[p.kind] || "agg"} #${p.id} (${p.n == null ? "?" : p.n} txs)`);
-      starks = `<div class="s c">final STARK = ${counts} txs</div>`;
-      tip = `builder folds ${names.join(" ⊕ ")} into the block's one final STARK (${b.folds} folds, budget B=${feed.cfg.b})`;
+function drawSpread(g, radius) {
+  drawDuplicates(g, radius);
+  // The transaction the follow mode just left keeps its tree for a slot,
+  // fading, so a switch reads as one wave giving way to the next.
+  // Not on the transaction page: there the positions are the current
+  // transaction's rows or lanes, which say nothing about the previous one.
+  const slot = feed.cfg ? feed.cfg.slot_length : 4000;
+  const left = player.simT - followPrev.at;
+  if (!isTimeline() && followPrev.tx !== null && left >= 0 && left < slot &&
+      followPrev.tx !== selectedFollowed())
+    drawTree(g, radius, followPrev.tx, 1 - left / slot);
+  drawTree(g, radius, selectedFollowed(), 1);
+}
+function drawTree(g, radius, tx, strength) {
+  const tree = tx === null ? null : state.spread.get(tx);
+  if (!tree) return;
+  const ctx = g.ctx;
+  ctx.lineWidth = 2;
+  const clock = isTimeline() ? txClock(tx) : null;
+  for (const [node, edge] of tree) {
+    if (!edge || edge.t > player.simT) continue;
+    let from = netPositions[edge.peer], to = netPositions[node];
+    if (!from || !to) continue;
+    if (clock) {
+      // Only the arrival is on record, so the arrow stands at that moment:
+      // from the peer's row or lane to the node's, at the delivery time.
+      // Staggered a pixel or two per node, so the arrows of nodes that
+      // learned in one instant stay countable instead of merging.
+      const x = timelineX(g, clock, edge.t) + ((node % 5) - 2) * 2;
+      from = [x, from[1]]; to = [x, to[1]];
     }
-    d.title = tip;
-    d.innerHTML =
-      `<div class="n">block ${b.slot}</div>` +
-      `<div class="t">${total === 0 ? "—" : total + " txs"}</div>` +
-      `<div class="s">${total === 0 ? "empty" : `${b.priv} priv, ${b.pq} pq`}</div>` +
-      starks;
-    row.appendChild(d);
-  });
+    // The most recent edges are the brightest, so the front of the wave is
+    // where the eye goes; the rest stays as the record of the path.
+    const age = Math.min(1, (player.simT - edge.t) / 2000);
+    ctx.globalAlpha = (0.9 - 0.5 * age) * strength;
+    ctx.strokeStyle = ctx.fillStyle = spreadColour(edge.form);
+    const dx = to[0] - from[0], dy = to[1] - from[1];
+    const length = Math.hypot(dx, dy) || 1;
+    const ux = dx / length, uy = dy / length;
+    const tipX = to[0] - ux * (radius + 2), tipY = to[1] - uy * (radius + 2);
+    ctx.beginPath();
+    ctx.moveTo(from[0] + ux * (radius + 2), from[1] + uy * (radius + 2));
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(tipX - ux * 7 - uy * 4, tipY - uy * 7 + ux * 4);
+    ctx.lineTo(tipX - ux * 7 + uy * 4, tipY - uy * 7 - ux * 4);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 }
 
-// ---------------------------------------------------------------- ticker/stats
-function drawHud() {
-  const cfg = feed.cfg;
-  if (!cfg) return;
-  const inSlot = player.simT % cfg.slot_length;
-  $("tickfill").style.width = (100 * inSlot / cfg.slot_length).toFixed(1) + "%";
-  $("ticklabel").textContent =
-    `slot: ${Math.floor(player.simT / cfg.slot_length)}  ·  time: ${(inSlot / 1000).toFixed(1)} s`;
-  state.boundaryFlash = Math.max(0, state.boundaryFlash - 0.03);
-  $("ticker").classList.toggle("boundary", state.boundaryFlash > 0);
-
-  $("s_items").textContent = state.items.size;
-  $("s_pending").textContent = state.pending;
-  $("s_tpb").textContent = state.blocks.length ? (state.incSum / state.blocks.length).toFixed(1) : "–";
-  $("s_delay").textContent = state.delayMean == null ? "–" : state.delayMean.toFixed(2);
-  $("status").textContent =
-    `trace: ${feed.events.length} events · last poll ${feed.lastPoll}` +
-    (feed.stalled ? " · POLL FAILED (is `python -m http.server` running next to trace.jsonl?)" : "");
+function timelineNote() {
+  if (!isTimeline()) return "";
+  const tx = selectedFollowed();
+  if (tx === null) return "no transaction followed — the timeline has no subject";
+  const placed = firstKnowing(tx).length;
+  return "x is tx " + tx + "'s own clock; " +
+    (netLayout === "rows"
+      ? "a row per node in the order it came to know, its bar the knowledge class over time"
+      : "a lane per hop from the entry") +
+    " · " + placed + " of " + state.nodeCount + " nodes have come to know it" +
+    " · ripples are admissions";
 }
 
-// ---------------------------------------------------------------- main loop
-let last = performance.now();
+/* The time axis, the settlement line, and -- for rows -- each node's class
+   history as a bar from the moment it came to know the transaction. Drawn
+   under the nodes and the tree. */
+function drawTimelineFrame(g) {
+  const tx = selectedFollowed();
+  if (tx === null) return;
+  const clock = txClock(tx);
+  const ctx = g.ctx;
+  const y = g.h - g.pad.b - 10;
+  ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(g.pad.l, y); ctx.lineTo(g.w - g.pad.r, y); ctx.stroke();
+  ctx.fillStyle = css("--ink2"); ctx.font = "10px system-ui";
+  ctx.textAlign = "left";
+  ctx.fillText("born " + (clock.born / 1000).toFixed(2) + " s", g.pad.l + 2, y + 12);
+  ctx.textAlign = "right";
+  // The right edge is born + span -- ahead of now while unsettled, since the
+  // span is held to whole slots -- so the label must not call it "now".
+  ctx.fillText((clock.settled ? "settled +" : "+") +
+               (clock.span / 1000).toFixed(2) + " s", g.w - g.pad.r - 2, y + 12);
+  if (clock.settled) {
+    const x = timelineX(g, clock, clock.end);
+    ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = css("--ink");
+    ctx.beginPath(); ctx.moveTo(x, g.pad.t); ctx.lineTo(x, y); ctx.stroke();
+    ctx.restore();
+  }
+  if (netLayout !== "rows") return;
+  const history = state.classHistory.get(tx);
+  if (!history) return;
+  const rowH = (y - 12 - g.pad.t - 8) / Math.max(1, history.size);
+  const thickness = Math.max(2, Math.min(10, rowH * 0.6));
+  for (const [node, entries] of history) {
+    const at = netPositions[node];
+    if (!at) continue;
+    for (let i = 0; i < entries.length; i++) {
+      const t0 = entries[i][0];
+      const t1 = i + 1 < entries.length ? entries[i + 1][0] : clock.end;
+      if (t0 > player.simT) break;
+      const x0 = timelineX(g, clock, t0);
+      const x1 = timelineX(g, clock, Math.min(t1, player.simT));
+      ctx.fillStyle = css(KNOWLEDGE_COLOUR[entries[i][1]] || "--k-none");
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(x0, at[1] - thickness / 2, Math.max(1, x1 - x0), thickness);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function networkLegend(spec, top) {
+  if (spec.id === "knowledge") {
+    const spread = spreadAvailable()
+      ? SPREAD_FORMS.map(f => '<span><span class="sw" style="background:' +
+          css(f[2]) + '"></span>spread via ' + f[1] + "</span>").join("")
+      : "<span>no spread tree: trace schema " +
+        ((feed.cfg && feed.cfg.trace_schema) || 1) + " predates attribution</span>";
+    const dups = dupsAvailable()
+      ? '<span><span class="sw" style="background:' + css("--dup") +
+        '"></span>duplicate delivery</span>'
+      : "<span>no duplicates recorded: trace schema " +
+        ((feed.cfg && feed.cfg.trace_schema) || 1) + " predates them</span>";
+    $("netlegend").innerHTML = KNOWLEDGE_ORDER.map(k =>
+      '<span><span class="sw" style="background:' + css(KNOWLEDGE_COLOUR[k]) +
+      '"></span>' + k.replace(/_/g, " ") + "</span>").join("") + spread + dups;
+    return;
+  }
+  let highest = 0;
+  for (const st of state.nodeState.values()) {
+    const value = spec.value(st);
+    if (value !== null && value !== undefined && value > highest) highest = value;
+  }
+  // A flat picture on a fixed scale is a lightly loaded network, and the
+  // legend has to say so or it reads as a broken palette.
+  const scale = top ? "0 → " + spec.format(top) + " · highest now " + spec.format(highest)
+                    : "0 → the highest value present, " + spec.format(highest) +
+                      (netScale === "present" && spec.top() ? " (stretched)"
+                                                            : " (no fixed ceiling)");
+  const size = netSize === "uniform" ? ""
+    : "<span>size: " + (netSize === "held" ? "view size" : "buffered bytes")
+      + " (√area, vs largest present)</span>";
+  $("netlegend").innerHTML =
+    '<span><span class="sw" style="width:36px;background:linear-gradient(90deg,' +
+    heatColour(0) + "," + heatColour(0.5) + "," + heatColour(1) +
+    ')"></span>low → high</span><span>' + scale + "</span>" +
+    '<span><span class="sw" style="background:' + css("--ghost") +
+    '"></span>no reading yet</span>' + size;
+}
+
+function nearestNode(x, y) {
+  let nearest = -1, best = 18 * 18;
+  for (let node = 0; node < netPositions.length; node++) {
+    const at = netPositions[node];
+    if (!at) continue;
+    const dx = at[0] - x, dy = at[1] - y;
+    const distance = dx * dx + dy * dy;
+    if (distance < best) { best = distance; nearest = node; }
+  }
+  return nearest;
+}
+
+function nodeStatRows(node) {
+  const st = state.nodeState.get(node);
+  const rows = ["node " + node];
+  const origin = effectiveRef();
+  const hops = netLayout === "ring" ? hopDistancesFrom(origin) : null;
+  if (hops) {
+    rows.push(hops.has(node) ? hops.get(node) + " hops from " + origin
+                             : "unreachable from " + origin);
+  }
+  if (st) {
+    rows.push("egress " + (st.egress === null ? "n/a"
+      : (st.egress * 100).toFixed(0) + "%"));
+    rows.push("cpu " + (st.cpu === null ? "n/a"
+      : (st.cpu * 100).toFixed(0) + "%"));
+    if (st.eqb !== null) rows.push("queued " + (st.eqb / 1e6).toFixed(2) + " MB");
+    rows.push("queue " + st.eq + " msg · view " + st.held);
+    rows.push("dropped " + st.dr + " (" + (st.drb / 1e6).toFixed(2) + " MB)");
+    rows.push("stale deps " + (st.stale === null ? "n/a" : st.stale));
+  } else {
+    rows.push("no counter sample yet");
+  }
+  const tx = selectedFollowed();
+  const byNode = tx === null ? null : state.knowledge.get(tx);
+  if (byNode) {
+    rows.push("tx " + tx + ": " +
+              (byNode.get(node) || "none").replace(/_/g, " "));
+    const list = state.dups.get(tx);
+    if (list) {
+      let received = 0, sent = 0;
+      for (const dup of list) {
+        if (dup.t > player.simT) break;
+        if (dup.n === node) received += 1;
+        if (dup.peer === node) sent += 1;
+      }
+      if (received || sent)
+        rows.push("duplicates of it: received " + received + " · sent " + sent);
+    }
+    const tree = state.spread.get(tx);
+    const edge = tree ? tree.get(node) : undefined;
+    if (edge && edge.t <= player.simT) {
+      rows.push("learned from node " + edge.peer + " via " +
+                (edge.form === "object" ? "its own object"
+                 : edge.form === "wrapper" ? "wrapper " + edge.o
+                 : edge.form === "announce" ? "an announcement"
+                 : "block notice") + " at " + (edge.t / 1000).toFixed(2) + " s");
+    }
+  }
+  return rows;
+}
+
+function networkPin() {
+  const pin = $("netpin");
+  if (netPinned === null || netPinned >= state.nodeCount) {
+    pin.hidden = true;
+    return;
+  }
+  const rows = nodeStatRows(netPinned);
+  rows.push('<span class="sub">pinned — click empty space to unpin</span>');
+  pin.hidden = false;
+  pin.innerHTML = rows.join("<br>");
+}
+
+function networkTooltip(g, spec) {
+  const tip = $("nettip");
+  if (!netHover) { tip.hidden = true; return; }
+  const nearest = nearestNode(netHover.x, netHover.y);
+  // The pinned node's numbers are already on screen and holding still;
+  // repeating them under the cursor would just cover other nodes.
+  if (nearest < 0 || nearest === netPinned) { tip.hidden = true; return; }
+  tip.hidden = false;
+  tip.innerHTML = nodeStatRows(nearest).join("<br>");
+  const width = tip.offsetWidth || 150;
+  const left = netHover.x + width + 16 > g.w ? netHover.x - width - 12
+                                             : netHover.x + 12;
+  tip.style.left = Math.max(2, left) + "px";
+  tip.style.top = Math.max(2, Math.min(netHover.y + 10, g.h - 120)) + "px";
+}
+
+/* Three pages. `charts` is the panels; `network` and `transaction` share the
+   overlay canvas and its bar, and differ in what position means: on the
+   network page it is place -- rings or a circle -- and on the transaction
+   page it is time, one followed transaction's own clock. Each page keeps its
+   own layout choice. */
+const PAGE_LAYOUTS = {
+  network: [["ring", "rings by hop distance"], ["circle", "circle by node id"]],
+  transaction: [["rows", "rows by first knowing"],
+                ["lanes", "lanes by hop distance"]],
+};
+const pageLayout = { network: "ring", transaction: "rows" };
+let activeTab = "charts";
+function setTab(name) {
+  activeTab = name;
+  const overlay = name === "network" || name === "transaction";
+  $("panels").hidden = name !== "charts";
+  $("network").hidden = !overlay;
+  $("netbar").hidden = !overlay;
+  $("netnote").hidden = !overlay;
+  for (const tab of ["charts", "network", "transaction"])
+    $("tab-" + tab).className = name === tab ? "tog on" : "tog";
+  if (overlay) {
+    $("netlayout").innerHTML = PAGE_LAYOUTS[name].map(pair =>
+      '<option value="' + pair[0] + '">' + pair[1] + "</option>").join("");
+    netLayout = pageLayout[name];
+    $("netlayout").value = netLayout;
+  }
+}
+for (const tab of ["charts", "network", "transaction"])
+  $("tab-" + tab).onclick = () => setTab(tab);
+$("netmetric").innerHTML = NET_METRICS.map(spec =>
+  '<option value="' + spec.id + '">' + spec.label + "</option>").join("");
+$("netmetric").value = netMetric;
+$("netmetric").onchange = function () { netMetric = $("netmetric").value; };
+$("netsize").onchange = function () { netSize = $("netsize").value; };
+$("netscale").onchange = function () { netScale = $("netscale").value; };
+$("showdups").onchange = function () { showDups = $("showdups").checked; };
+$("netlayout").onchange = function () {
+  netLayout = $("netlayout").value;
+  if (activeTab === "network" || activeTab === "transaction")
+    pageLayout[activeTab] = netLayout;
+};
+$("netref").onchange = function () { netRef = parseInt($("netref").value, 10); };
+(function () {
+  const plot = $("netplot");
+  plot.onmousemove = function (event) {
+    const box = plot.getBoundingClientRect();
+    netHover = { x: event.clientX - box.left, y: event.clientY - box.top };
+  };
+  plot.onmouseleave = function () { netHover = null; };
+  plot.onclick = function (event) {
+    const box = plot.getBoundingClientRect();
+    const nearest = nearestNode(event.clientX - box.left,
+                                event.clientY - box.top);
+    // A miss unpins rather than doing nothing: the empty canvas is the only
+    // dismiss control there is, and a click should never be a no-op.
+    netPinned = nearest < 0 ? null : nearest;
+    if (nearest >= 0 && !$("netref").disabled) {
+      netRef = nearest;
+      $("netref").value = String(nearest);
+    }
+  };
+})();
+
+buildPanels();
+setInterval(function () { feed.poll(); }, 1000);
+feed.poll();
+
+let lastFrame = performance.now();
 function frame(now) {
-  const dt = Math.min(100, now - last);
-  last = now;
+  const dt = Math.min(100, now - lastFrame);
+  lastFrame = now;
   player.step(dt);
-  drawPool(); drawBlocks(); drawHud();
+  followTick(); tiles(); blocksRibbon(); selectors(); hud();
+  // Only the visible view is drawn. The hidden one has zero-size canvases
+  // anyway, and redrawing it would spend the frame budget on nothing.
+  if (activeTab === "charts") drawPanels();
+  else drawNetwork();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 </script>
-</body>
-</html>

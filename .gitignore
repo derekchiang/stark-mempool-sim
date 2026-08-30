@@ -1,3 +1,15 @@
 __pycache__/
 *.pyc
 *~
+trace.jsonl
+node_modules/
+test-results/
+playwright-report/
+.render-fixture/
+bench-baseline/
+.DS_Store
+.venv/
+venv/
+.idea/
+.vscode/
+*.csv

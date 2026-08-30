@@ -1,0 +1,11 @@
+{
+  "name": "stark-mempool-sim-render-checks",
+  "private": true,
+  "description": "Rendering checks for viewer.html; the simulator itself stays stdlib Python",
+  "scripts": {
+    "test:render": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}

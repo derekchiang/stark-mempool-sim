@@ -1,0 +1,16 @@
+# Running from a clone needs no install step; the metadata below exists so
+# packaging-aware tools can see the Python floor and the absence of
+# dependencies.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stark-mempool-sim"
+version = "0.0.0"
+description = "A stdlib-only discrete-event simulator for EIP-8288 mempool STARK aggregation"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools]
+packages = ["starksim"]
