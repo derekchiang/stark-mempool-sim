@@ -122,6 +122,15 @@ wrappers, and block notices pay `verify_recv` on the receiver's CPU before they
 are admitted or relayed. Announcements and wants are control messages and do
 not create verification jobs. See
 [ADR 0004](decisions/0004-store-and-forward-verification.md).
+With `verify_cost` configured, deliveries are priced by the evidence they
+carry instead of the flat duration — natively, a bare signature verifies in
+microseconds while any STARK-class object costs tens of milliseconds, a
+spread one number cannot express. A mode 0 wrapper then pays for every
+witness it ships, and a block notice pays one STARK-class verification for
+the block it delivers; under `chain_notify="instant"` there are no block
+messages, so no block verification is charged in either pricing. The model
+keeps no per-dependency validity cache, so a witness arriving again inside a
+mode 0 wrapper is re-verified.
 
 Three relay policies define how raw pool objects move:
 

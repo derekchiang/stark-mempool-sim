@@ -1,10 +1,7 @@
 > Historical record, not a specification. Current material: see [docs/model.md](../model.md).
 
 > **What this is.** The design as it was written and revised, with its rationale
-> and the questions it left open. The phase-by-phase record of building it — the
-> acceptance criteria, the amendments, and the result tables later shown to be
-> confounded — and the retired viewer plan are kept with the development
-> history on the `netsim/v2-base` branch rather than in this tree.
+> and the questions it left open.
 
 # Plan: a networked mempool model (v2)
 

@@ -22,8 +22,3 @@ Both documents name things that no longer exist: files that were reorganised or
 deleted with v1, event names that never reached the code, and result tables since
 shown to be confounded and marked as such where they appear. They are records of
 intent at a moment, not of the tree as it stands.
-
-The unsquashed development history — the build log, the retrospective journal,
-the retired viewer plan, and the fifteen adversarial-review transcripts that
-shaped all of it — is on the `netsim/v2-base` branch rather than in this tree,
-since each of those documents is evidence about specific commits.

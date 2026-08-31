@@ -63,6 +63,7 @@ AXES = {
     "fold_threshold": str,
     "aggregation_trigger": str,
     "proving_budget": float,
+    "fold_amortize": float,
 }
 
 

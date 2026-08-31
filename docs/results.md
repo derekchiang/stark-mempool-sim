@@ -30,11 +30,11 @@ drift away from them.
 
 | | Question | Standing | Biggest gap |
 | --- | --- | --- | --- |
-| **O1** | What load fits an ordinary uplink? | Frontier located for one fixture, and the wrapper cadence — not the load — is what sets it. At 25 Mbit/s the EIP as written includes every PQ transaction to 128 tx/s by overspending the uplink; the levers without `capped8` include the same for half the bytes, and `capped8` caps inclusion | The frontier as a function of tick interval and degree, and under a realistic transaction mixture |
-| **O2** | What proving rate does keeping pace require? | Opened. Proving is now priced by what the circuit verifies, and on that basis the plan shape decides throughput rather than trimming it. A fold must fit the interval, which bounds it at ~2 inputs | The CPU-bound regime; the proving budget swept deliberately; whether the other objectives' conclusions survive real fold costs |
+| **O1** | What load fits an ordinary uplink? | Frontier located for one fixture, and the wrapper cadence — not the load — is what sets it. At 25 Mbit/s the EIP as written includes every PQ transaction to 128 tx/s by overspending the uplink; the levers without `capped8` include the same for half the bytes, and `capped8` caps inclusion. Under a mainnet-shaped mixture the binding resource moves off the wire entirely — see O2 | The frontier as a function of tick interval and degree; bursty arrivals |
+| **O2** | What proving rate does keeping pace require? | Answered for one fixture on calibrated costs: the single CPU binds at mainnet privacy shares — proving takes 82–87% of it, receive verification a material rest. A fast desktop clears ~5 privacy tx/s within two slots of load end at 12 s slots; one with 2.4× slower proving clears none. Plan shape still decides throughput (binary halves wide's inclusion) | Native verification of the real message mix and the leanSTARK witness weight — both external measurements that move the frontier |
 | **O3** | Does folding deliver the density the design assumes? | **Not measured.** What stands here is an illustration whose two numbers are both set by the fixture | Claimed transactions per selected object, as a function of load and budget |
 | **O4** | Where is capacity, and what happens past it? | Two phenomena found and understood: a clearance-time threshold, and retry-induced collapse below capacity | Portability, which is blocked on the offered-load metric rather than on effort |
-| **O5** | Which of the EIP's open choices matter? | Machinery complete and most choices priced, the supersede policies included | A gossipsub-shaped relay; the supersede race repeated where bandwidth binds |
+| **O5** | Which of the EIP's open choices matter? | Machinery complete and most choices priced, the supersede policies included. Amortizing the crossover threshold (k of 8 or 16) repairs its aggregation-off collapse; the byte savings measured alongside belong to the bandwidth levers it rides with | A gossipsub-shaped relay; the supersede race repeated where bandwidth binds |
 | **O6** | Does position decide inclusion? | Answered for one topology family: delay attaches to place once diffusion-limited, and deadlines turn that into exclusion | Other topologies, degree heterogeneity, and placement under `wrapper_only` |
 
 Two things are true of every row: nothing is validated against a client or a
@@ -70,7 +70,9 @@ than a collapse in progress. Post-quantum signatures at 3.2 kB hold 100% with
 zero drift across the entire sweep, so their frontier is far higher and remains
 unlocated. The binding object is therefore the privacy transaction carrying its
 own 263 kB witness, and this frontier is for privacy-only and PQ-only
-workloads — a realistic mixture is roadmap item 1.
+workloads on a wire-only cost model — the mixed-workload frontier with
+verification priced is measured under O2, where the binding resource turns
+out not to be the wire at all.
 
 **One 256 kB proof crosses a 200-node overlay inside a slot; twenty per slot do
 not.** Uncontended, a single privacy object reaches every node in 3.4 s at
@@ -387,6 +389,73 @@ python3 -m bench.sweep --axis cpu_discipline --values fifo,priority --prove-cost
 than averaged. Priority reduced queue depth but did not improve inclusion or
 delay on this fixture.
 
+**At mainnet privacy shares the node's single CPU is what binds, and
+proving takes the larger share of it: on leanVM-b-calibrated costs a fast
+desktop clears about five privacy transactions per second within two slots
+of the load ending, and one whose proving is 2.4× slower clears none.**
+Proving is priced in leanVM-b cycles anchored on its measured 417 ms 2-to-1
+fold; receive verification by what each delivery carries — 15.6 ms per
+STARK-class object, extrapolated from leanVM-b's one measured 14.1–17.1 ms
+native verification, and an unmeasured 0.1 ms per bare signature.
+Twelve-second slots, births over 5 slots, mixed kinds at a stated share,
+40 nodes at degree 6 on 25 Mbit/s uplinks. Inclusion is read two quiet
+slots after the last birth — the horizon is part of every number below. A
+cell is *held* when every seed includes ≥ 95% of arrivals within it,
+*collapsed* when every seed includes < 60%, *marginal* otherwise:
+
+| tx/s | privacy share | eip_faithful | delay | CPU | high_throughput |
+| --- | --- | --- | --- | --- | --- |
+| 5 | 0 – 0.5 | held, 300/300 at every share | ≤ 0.78 | 45–81% | held from 0.2 up |
+| 15 | 0.2 | held, 900/900 | 0.95 | 93% | held, 900/900 |
+| 15 | 0.35 | held, 893/900 | 1.48 | 95% | marginal, 540/900 |
+| 15 | 0.5 | marginal, 730/900 | 1.64 | 96% | collapsed, 380/900 |
+| 30 | 0 | held, 1800/1800 | 0.69 | 71% | held, 1760/1800 |
+| 30 | 0.2 | marginal, 1230/1800 | 1.61 | 96% | collapsed, 702/1800 |
+| 30 | 0.35 | collapsed, 1006/1800 | 1.82 | 97% | collapsed, 473/1800 |
+
+Two pre-registered caveat rows move the classification. Hardware: with
+proving 2.4× slower (a 1000 ms fold anchor — the anchor scales proving
+only), 20% privacy collapses at every rate measured — 152/300 at 5 tx/s,
+171/900 at 15. The unmeasured leanSTARK witness weight: at twice the
+nested-proof weight, 15 tx/s at 20% privacy falls from held to marginal
+(725/900).
+
+```sh
+python3 -m bench.mainnet --tps 5,15,30 --privacy-share 0,0.2,0.35,0.5 \
+    --leanstark-factor 1 --anchor-ms 417 --seeds 8
+python3 -m bench.mainnet --tps 5,15 --privacy-share 0.2 \
+    --leanstark-factor 1 --anchor-ms 1000 --seeds 8
+python3 -m bench.mainnet --tps 15 --privacy-share 0.2,0.35 \
+    --leanstark-factor 2 --anchor-ms 417 --seeds 8
+```
+
+**bench**, **medium** where the per-seed classification is unanimous,
+**low** in the four cells where seeds straddle a boundary
+(`high_throughput` at 5 tx/s share 0, at 15/0.35 factor 1, and at 15/0.2
+factor 2; `eip_faithful` at 15/0.35 factor 2). The mechanism, from the
+engine's per-kind CPU accounting at the failing cells: proving consumes
+82–87% of total CPU capacity and receive verification 9–13%, and with
+both verify prices set to zero the cells stay broken (768–778/900 at
+15/0.5, 175–187/300 at the slow anchor) — so proving binds independently,
+and verification moves the frontier on top of it rather than causing it.
+Root claims stay wide at the fast anchor (75–115 transactions) and
+collapse at the slow one (8–12), the tell that the proving budget starves.
+Five caveats bound the claim's reach. Inclusion is horizon-dependent:
+lengthening the drain from 0 to 4 quiet slots moves 15 tx/s share 0.35
+from 669/900 to 900/900, so held-versus-marginal boundaries are claims
+about clearing within two slots, not about steady state — and delay
+averages only what was included, a right-censored statistic. The STARK
+verify price is an extrapolation from one measured proof size and the
+signature price is unmeasured; a 3-seed probe found the latter material —
+raising it 0.1 → 0.9 ms cut inclusion 27% at 30 tx/s — and the measured
+14.1–17.1 band flips marginal cells, so native verification of the real
+message mix is the single most valuable external measurement. Arrivals
+are uniformly spaced; bursts at 95% CPU would break cells uniform holds.
+The default instant chain notification carries no block messages, so
+block verification is uncharged. And the two circuits leanVM-b did
+measure disagree by 25% on milliseconds per cycle, a floor on the time
+scale's error that the anchor axis is designed to absorb.
+
 ## O3 — Aggregation leverage: what the block budget binds on
 
 **`block_budget` limits objects, not transactions, so what a block settles
@@ -649,6 +718,78 @@ python3 -m bench.sweep --axis inclusion_policy --values body_required,claim_only
 
 **bench**, **null result**. No difference was observed at these operating
 points.
+
+**Amortizing the crossover threshold repairs its failure outright — with
+it, the `high_throughput` configuration matches or beats the EIP's
+always-fold inclusion in every paired seed at every rate at the measured
+anchor for 17–22% fewer bytes; single-variable controls attribute those
+bytes to the configuration's bandwidth levers and the repair itself to the
+factor.** The local crossover rule compares a fold's proof bytes against
+the witnesses it replaces at the folder's own uplink; `fold_amortize`
+scales the witnesses' side to stand in for the fold's benefits beyond that
+uplink — a block slot carrying the whole claim, downstream receivers
+verifying one proof instead of every witness, nobody proving the coverage
+twice. All-signature load (the regime where plain crossover defers),
+share 0, factor 1, verification priced as in the frontier entry above;
+included transactions and offered MB per configuration — note these are
+whole-configuration rows, differing in relay policy, wrapper economy and
+mode as well as threshold:
+
+| tx/s | always (eip_faithful) | crossover (k=1) | k=8 | k=16 |
+| --- | --- | --- | --- | --- |
+| 5 | 300 / 4698 | 256 / 449 | 300 / 3325 | 300 / 3655 |
+| 15 | 900 / 5240 | 891 / 1664 | 900 / 4240 | 900 / 4311 |
+| 30 | 1800 / 6025 | 1760 / 2312 | 1800 / 4774 | 1800 / 4814 |
+| 50 | 3000 / 6918 | 2983 / 4828 | 3000 / 5755 | 3000 / 5740 |
+
+At the 2.4× slower proving anchor plain crossover proves nothing at all —
+the one-interval budget plus the local rule switch aggregation off, and
+inclusion falls to the block budget (42) at every rate — while the
+amortized rule keeps folding. It escapes that structural floor rather than
+the overload: at 50 tx/s every seed of every folding configuration remains
+collapsed under this entry's own rule.
+
+| tx/s | always (eip_faithful) | crossover (k=1) | k=8 | k=16 |
+| --- | --- | --- | --- | --- |
+| 5 | 300 / 4427 | 42 / 39 | 300 / 2987 | 300 / 3276 |
+| 15 | 900 / 5051 | 42 / 118 | 900 / 4068 | 889 / 4156 |
+| 30 | 933 / 5711 | 42 / 236 | 990 / 4068 | 929 / 3995 |
+| 50 | 795 / 6343 | 42 / 394 | 1002 / 4337 | 898 / 4171 |
+
+```sh
+python3 -m bench.mainnet --tps 5,15,30,50 --privacy-share 0 \
+    --leanstark-factor 1 --anchor-ms 417,1000 --seeds 8 \
+    --presets eip_faithful,high_throughput,high_throughput+fold_amortize=8,high_throughput+fold_amortize=16,high_throughput+fold_amortize=32,high_throughput+fold_amortize=64
+```
+
+**bench**, **medium** — the dominance claim was pre-registered as a
+per-seed paired rule (k=16 inclusion ≥ always in at least 7 of 8 seeds,
+bytes lower in 8 of 8) and passes 8-of-8 on both counts at every rate at
+the 417 ms anchor; the same rule also passes for k=8 at every rate, so the
+evidence selects the amortization, not one factor. At the 1000 ms anchor
+the rule fails at 15–50 tx/s and the table stands without a dominance
+claim: the folding rows at 30 and 50 tx/s are seed-noisy (always spans
+733–918 included at 50 tx/s, k=16 spans 715–1152) while at 5 and 15 tx/s
+they are exact, k=8 matches always seed-for-seed at 15 tx/s with 20% fewer
+bytes there, and the apparent decline of the mean with larger k dissolves
+into overlapping seed ranges, per the pre-registered rule for that
+observation. Attribution comes from single-variable controls (3 seeds,
+**probe**): on either base, changing only the threshold moves offered
+bytes by at most 1% — the 17–22% in the tables belongs to
+`high_throughput`'s relay, economy and mode levers — and wrapper emissions
+are not fewer under amortization (3 015 against always's 2 795 cores at
+50 tx/s). What the factor itself buys is the repair — 42 to 900 on the
+same base — plus, in the same controls, a consistent same-base edge over
+`always` at the slow anchor (778 → 849 on the EIP base, 767 → 924 on
+`high_throughput` at 50 tx/s), which suggests deferring the narrowest
+folds helps when proving is scarce but is probe-grade. The thresholds in
+bytes: k = 16 first folds a claim of seven signatures where plain
+crossover waits for one hundred and three (witness bytes only, 2 560 per
+signature against the 262 144-byte proof), and a lone signature's re-proof
+is still declined. Measured on all-signature load, where crossover's
+pathology lives; on mixed loads any claim holding one privacy witness
+already clears the local threshold, so the factor has little left to
+decide there.
 
 
 ## O6 — Position: does where you are decide what happens to you?

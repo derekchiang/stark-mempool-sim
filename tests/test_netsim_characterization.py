@@ -20,13 +20,13 @@ CONSTRUCTOR_PARAMETERS = (
     "relay_policy", "proposer_mode", "proposer_id",
     "pin_own_aggregate",
     "engine", "chain",
-    "chain_notify", "costs", "slot_length", "block_budget", "seen_limit",
+    "chain_notify", "costs", "verify_cost", "slot_length", "block_budget", "seen_limit",
     "candidate_limit", "coverage_cache_limit", "aggregation_interval",
     "aggregation_trigger",
     "selection_strategy", "fold_plan", "supersede_policy",
     "eviction_policy", "wrapper_economy", "inclusion_policy",
     "cpu_discipline", "prove_cost_basis", "wrapper_mode",
-    "fold_threshold", "on_tick_overrun",
+    "fold_threshold", "fold_amortize", "on_tick_overrun",
     "proving_budget", "entry_subset", "trace",
     "trace_focus", "trace_sample", "trace_counter_interval", "trace_follow",
     "trace_follow_rate", "trace_follow_seed", "egress_queue_bytes",
@@ -66,6 +66,8 @@ EXPECTED_CSV_COLUMNS = [
     "circuit_ms_per_hash", "circuit_overhead_hashes", "circuit_sphincs_hashes",
     "circuit_leanstark_hashes", "circuit_recursive_hashes",
     "circuit_trace_rows_per_hash", "circuit_trace_cap",
+    "verify_sig_ms", "verify_stark_ms", "verify_message_ms",
+    "fold_amortize",
 ]
 
 EXPECTED_CSV_ROW = (
@@ -77,7 +79,8 @@ EXPECTED_CSV_ROW = (
     "0,-1,-1,-1.000000,96,32,2560,262144,262144,512,0,-1,-1,-1,0,0,"
     "0,0,0,0,0,0,0,0,0,-1,0,keep_all,full,0,0,body_required,fifo,0,"
     "usefulness,deps,-1,recursive,0,always,0,spread,True,0,"
-    "-1,-1,-1,-1,-1,-1,-1"
+    "-1,-1,-1,-1,-1,-1,-1,"
+    "-1.000000,-1.000000,-1.000000,1.000000"
 )
 
 VARIANT_KEYS = {
@@ -100,6 +103,8 @@ VARIANT_KEYS = {
     "circuit_ms_per_hash", "circuit_overhead_hashes", "circuit_sphincs_hashes",
     "circuit_leanstark_hashes", "circuit_recursive_hashes",
     "circuit_trace_rows_per_hash", "circuit_trace_cap",
+    "verify_sig_ms", "verify_stark_ms", "verify_message_ms",
+    "fold_amortize",
 }
 
 METRIC_ONLY_KEYS = {
@@ -138,12 +143,13 @@ EXPECTED_TRACE = (
     '"eviction_policy":"usefulness","wrapper_economy":"full",'
     '"inclusion_policy":"body_required","cpu_discipline":"fifo",'
     '"prove_cost_basis":"deps","wrapper_mode":"recursive",'
-    '"fold_threshold":"always",'
+    '"fold_threshold":"always","fold_amortize":1.0,'
     '"on_tick_overrun":"fifo",'
     '"proving_budget":1000.0,"cost_verify_recv":0.0,'
     '"cost_prove_recursive":0.0,"cost_build_block":0.0,'
     '"cost_verify_recv_100":0.0,"cost_prove_recursive_100":0.0,'
-    '"cost_jitter":0.0,"seed":"7","circuit_ms_per_hash":-1,'
+    '"cost_jitter":0.0,"verify_sig_ms":-1.0,"verify_stark_ms":-1.0,'
+    '"verify_message_ms":-1.0,"seed":"7","circuit_ms_per_hash":-1,'
     '"circuit_overhead_hashes":-1,"circuit_sphincs_hashes":-1,'
     '"circuit_leanstark_hashes":-1,"circuit_recursive_hashes":-1,'
     '"circuit_trace_rows_per_hash":-1,"circuit_trace_cap":-1,'

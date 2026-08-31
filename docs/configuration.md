@@ -121,6 +121,7 @@ it.
 | `chain` | `None` | Supply a `ChainState`. `None` builds one. |
 | `size_model` | `None` | Supply a `SizeModel` (see *Message sizes*). `None` builds the default. |
 | `costs` | `None` | Supply a `CostTable` (see *Proving cost and CPU*). `None` builds a free one, which is a legal configuration. |
+| `verify_cost` | `None` | Supply a `NativeVerifyCost(per_signature, per_stark, per_message=0)` to price receive verification by the evidence a delivery carries: a signature body pays `per_signature`; a privacy body, aggregate body, mode 1 wrapper, or block notice pays `per_stark`; a mode 0 wrapper pays for every witness it ships. `per_message` is overhead per verification performed, so duplicates pay nothing, and `jitter_frac` does not apply. `None` keeps the flat per-message `verify_recv` everywhere. |
 
 ## Bandwidth and queues
 
@@ -173,6 +174,7 @@ The four registry families. `strategies.names(family)` lists what is registered;
 | `wrapper_economy` | `full` | `full`, `skip_unchanged`, `proof_by_ref`, `lean` | Which redundant wrapper bytes are withheld from a peer known to hold them: nothing, the whole wrapper, the proof as a 32-byte hash, or both. |
 | `wrapper_mode` | `recursive` | `recursive`, `cheapest` | `recursive` is always mode 1. `cheapest` emits the EIP's mode 0 — the dependencies' raw witnesses — when the node **holds** every claimed witness and they weigh less than a proof. A mode-0 delivery leaves the receiver witness-backed, never holding a recursive proof. |
 | `fold_threshold` | `always` | `always`, `crossover` | `always` folds every interval. `crossover` declines while the claim's own witnesses weigh less than the proof that would replace them. Needs something other than wrappers to carry transactions meanwhile, so it stalls `wrapper_only`. |
+| `fold_amortize` | `1.0` | float >= 1 | Scales the witnesses' side of the `crossover` comparison, standing in for a fold's benefits beyond the folder's own uplink: block-slot compression, downstream verification, proving once. `1.0` is the strictly local reading; large values approach `always`. Refused with any other threshold, where it is inert. |
 
 ## Proving cost and CPU
 
@@ -281,7 +283,8 @@ producing and watching one.
 `wrapper_economy`, `inclusion_policy`, `cpu_discipline`, `prove_cost_basis`,
 `wrapper_mode`, `fold_threshold`, `on_tick_overrun`,
 `block_budget`, `entry_subset`, `aggregation_interval`,
-`slot_length`, `proving_budget`, `aggregation_trigger`. `--set KEY=VALUE` holds
+`slot_length`, `proving_budget`, `aggregation_trigger`,
+`fold_amortize`. `--set KEY=VALUE` holds
 any of the same names at
 a non-default value, `--prove-cost-circuit MS` selects circuit pricing, and the
 axis names are validated so a typo cannot become a row describing a
@@ -289,7 +292,7 @@ configuration nobody ran.
 <!-- sweep-axes:end -->
 
 **The focused benches** — `propagation`, `economy`, `overload`, `placement`,
-`triage`, `v1_calibration`, `levers`, `throughput` — each fix a scenario and expose the workload knobs that scenario turns.
+`triage`, `v1_calibration`, `levers`, `throughput`, `mainnet` — each fix a scenario and expose the workload knobs that scenario turns.
 `--help` on any of them is authoritative.
 
 **`tools.live_run`** exposes `--preset`, `--nodes`, `--degree`, `--uplink-mbps`, `--latency`,

@@ -378,7 +378,8 @@ class NodeView:
     __slots__ = ("node_id", "seen", "verifying", "held", "requested",
                  "duplicates", "relayed", "bodies", "verified_proofs",
                  "peer_bodies", "peer_proofs", "seen_blocks",
-                 "verifying_proofs", "witness_backed", "wrapper_provenance")
+                 "verifying_proofs", "witness_backed", "upgrading",
+                 "wrapper_provenance")
 
     def __init__(self, node_id, peers=(), seen_limit=None):
         self.node_id = node_id
@@ -407,6 +408,9 @@ class NodeView:
         # from `verified_proofs` by construction; an id can move from here to
         # there when the proof itself later arrives, never the other way.
         self.witness_backed = set()
+        # Proof verifications in flight behind a witness verification of
+        # the same claim: the upgrade case, where two jobs share one id.
+        self.upgrading = set()
         # Which held aggregates each peer's wrappers delivered, so a newer
         # wrapper from that peer can supersede them. Provenance is who
         # *delivered* the aggregate, not who created it: the design's rule is
@@ -581,13 +585,13 @@ class Node:
         recursive proof for a claim already witness-backed is *new* evidence and
         is worth verifying. The reverse is not: witnesses for a claim whose proof
         is held add nothing. When the proof arrives while witnesses for the same
-        id are still in flight, the marker is cleared without charging a second
-        verification -- the bytes did arrive, and the claim is already being
-        checked, so paying twice would price the same work twice. That copy is
-        not a duplicate, though it verifies nothing and may carry no fresh
-        body: it turns pending witnesses into a pending proof, which changes
-        what the claim can later be resolved by reference against. `upgraded`
-        is how the caller tells that copy from one that taught nothing.
+        id are still in flight, that copy is not a duplicate and it pays its
+        own verification: checking a proof is different work from checking
+        witnesses, whatever a flat table happens to charge for each, so the
+        claim carries two pending jobs -- the witnesses' and the proof's --
+        and the evidence installed is decided by which job finishes, not by
+        arrival order. `upgraded` is how the caller tells that copy from one
+        that taught nothing.
         """
         settled_witnesses = proof_id in self.view.witness_backed
         known = proof_id in self.view.verified_proofs
@@ -597,6 +601,8 @@ class Node:
         upgraded = in_flight and settled_witnesses and not witness_backed
         if in_flight and not witness_backed:
             self.view.witness_backed.discard(proof_id)
+            if upgraded:
+                self.view.upgrading.add(proof_id)
         elif settled_witnesses and witness_backed:
             known = True
         # Fresh means not held *and* not already on its way in: a body another
@@ -605,6 +611,9 @@ class Node:
         for bodies in self.view.verifying_proofs.values():
             pending |= bodies
         fresh_bodies = body_mask & ~(self.view.bodies | pending)
+        if upgraded:
+            self.view.verifying_proofs[proof_id] |= fresh_bodies
+            return True, fresh_bodies, True
         if known or in_flight:
             if in_flight:
                 self.view.verifying_proofs[proof_id] |= fresh_bodies
@@ -626,30 +635,48 @@ class Node:
             self.view.witness_backed.discard(proof_id)
         return True, fresh_bodies, False
 
-    def finish_wrapper(self, proof_id):
+    def finish_wrapper(self, proof_id, witness_backed=False):
         """Verification done: install the evidence and the bodies it brought.
 
-        Which evidence was installed depends on what was being verified: a mode 0
-        wrapper's witnesses leave the claim witness-backed, and only a recursive
-        proof reaches `verified_proofs`. Recording mode 0 as a verified proof
-        would let this node be sent that proof's 32-byte hash in place of bytes
-        it never received, and would price a later fold over it as verifying one
-        nested proof instead of every signature behind it.
+        Which evidence is installed depends on what the finished job was
+        checking, so the caller names it: a mode 0 wrapper's witnesses leave
+        the claim witness-backed, and only a recursive proof reaches
+        `verified_proofs`. Recording mode 0 as a verified proof would let
+        this node be sent that proof's 32-byte hash in place of bytes it
+        never received, and would price a later fold over it as verifying one
+        nested proof instead of every signature behind it. During an upgrade
+        the claim has two jobs in flight; a witness job finishing first keeps
+        the claim pending for the proof job still running.
         """
+        if witness_backed and proof_id in self.view.upgrading:
+            bodies = self.view.verifying_proofs.get(proof_id, 0)
+            self.view.verifying_proofs[proof_id] = 0
+            self.view.bodies |= bodies
+            return bodies
         bodies = self.view.verifying_proofs.pop(proof_id, 0)
-        if proof_id not in self.view.witness_backed:
+        self.view.upgrading.discard(proof_id)
+        if not witness_backed:
+            self.view.witness_backed.discard(proof_id)
             self.view.verified_proofs.add(proof_id)
         self.view.bodies |= bodies
         return bodies
 
-    def abandon_wrapper(self, proof_id):
-        """Give up on a wrapper's evidence -- never on its contents.
+    def abandon_wrapper(self, proof_id, witness_backed=False):
+        """Give up on one job's evidence -- never on its contents.
 
         The bodies an in-flight copy brought physically arrived, and the
         sender's per-peer body belief formed at delivery, so they will not be
         sent here in full again. Dropping them with the proof would starve this
-        node of content the network believes it has.
+        node of content the network believes it has. During an upgrade only
+        the abandoning job's own evidence is given up: losing the proof job
+        reverts the claim to witness-pending, and losing the witness job
+        leaves the proof job to finish.
         """
+        if proof_id in self.view.upgrading:
+            self.view.upgrading.discard(proof_id)
+            if not witness_backed:
+                self.view.witness_backed.add(proof_id)
+            return
         bodies = self.view.verifying_proofs.pop(proof_id, 0)
         self.view.witness_backed.discard(proof_id)
         self.view.bodies |= bodies

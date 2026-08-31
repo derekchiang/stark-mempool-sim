@@ -16,7 +16,7 @@ import random
 
 from starksim import aggregation as _aggregation  # register built-in strategies
 from starksim.aggregation import input_composition
-from starksim.arena import KIND_PQ, Arena, useful_count
+from starksim.arena import KIND_PQ, KIND_PRIVACY, Arena, useful_count
 from starksim.chain import (ChainState, InstantNotifier, OverlayNotifier,
                             ProposerSchedule)
 from starksim.costs import (BUILD_BLOCK, PROVE_COST_BASES, PROVE_COST_CIRCUIT,
@@ -183,6 +183,9 @@ _CPU_RANK = {VERIFY_RECV: 0, BUILD_BLOCK: 1, PROVE_RECURSIVE: 2}
 # legitimate experiment, while `request_timeout` under `flood` cannot do
 # anything at all.
 INERT_SETTINGS = (
+    ("fold_amortize",
+     lambda sim: sim.fold_threshold != FOLD_AT_CROSSOVER,
+     "it scales the crossover comparison, and no other threshold compares"),
     ("eviction_policy",
      lambda sim: sim.nodes and sim.nodes[0].candidate_limit is None,
      "it decides what a full candidate set drops, and without "
@@ -254,7 +257,8 @@ class NetworkSim:
         # Wiring.
         "engine", "overlay", "arena", "chain", "notifier", "nodes",
         "proposers", "seed", "rng_entry", "size_model", "egress",
-        "link_servers", "rotation", "costs", "_selection_costs", "cpu",
+        "link_servers", "rotation", "costs", "verify_cost",
+        "_selection_costs", "cpu",
         "_request_sources",
         "knowledge", "_departed", "_trace_finished", "_expiry_queue",
         "own_aggregate", "entry_nodes", "entry_of", "tx_records", "tracer",
@@ -269,7 +273,7 @@ class NetworkSim:
         "_supersede_strategy", "eviction_policy", "wrapper_economy",
         "inclusion_policy", "cpu_discipline", "prove_cost_basis",
         "wrapper_mode", "mode_zero_wrappers",
-        "fold_threshold", "folds_deferred",
+        "fold_threshold", "fold_amortize", "folds_deferred",
         "on_tick_overrun", "proving_budget", "entry_subset",
         "_dedicated_builder", "_material", "_woke_at",
         "pin_own_aggregate",
@@ -296,7 +300,8 @@ class NetworkSim:
                  proposer_mode="fixed", proposer_id=0,
                  pin_own_aggregate=True,
                  engine=None, chain=None,
-                 chain_notify="instant", costs=None, slot_length=4000.0,
+                 chain_notify="instant", costs=None, verify_cost=None,
+                 slot_length=4000.0,
                  block_budget=5, seen_limit=None, candidate_limit=None,
                  coverage_cache_limit=None, aggregation_interval=1000.0,
                  aggregation_trigger=TRIGGER_SPREAD,
@@ -308,7 +313,7 @@ class NetworkSim:
                  cpu_discipline=CPU_FIFO,
                  prove_cost_basis=PROVE_COST_DEPS,
                  wrapper_mode=WRAPPER_MODE_RECURSIVE,
-                 fold_threshold=FOLD_ALWAYS,
+                 fold_threshold=FOLD_ALWAYS, fold_amortize=1.0,
                  on_tick_overrun="fifo",
                  proving_budget=None, entry_subset=None,
                  trace=None, trace_focus=None,
@@ -331,6 +336,11 @@ class NetworkSim:
             raise ValueError(f"unknown wrapper mode {wrapper_mode!r}")
         if fold_threshold not in FOLD_THRESHOLDS:
             raise ValueError(f"unknown fold threshold {fold_threshold!r}")
+        fold_amortize = float(fold_amortize)
+        if fold_amortize < 1.0:
+            raise ValueError("fold_amortize must be >= 1.0: below one it "
+                             "would discount the witnesses a fold replaces, "
+                             "which nothing downstream ever does")
         if prove_cost_basis == PROVE_COST_CIRCUIT:
             table = costs if costs is not None else CostTable(seed=seed)
             if not isinstance(table.costs[PROVE_RECURSIVE], CircuitCost):
@@ -387,6 +397,7 @@ class NetworkSim:
                 None if egress_queue_bytes is None else _message_bytes))
         self.link_servers = {}
         self.costs = costs if costs is not None else CostTable(seed=seed)
+        self.verify_cost = verify_cost
         # One CPU per node, serialising everything it computes: processing a
         # received message, proving an aggregate, building a block. The whole
         # point of a single server is that these compete.
@@ -492,6 +503,7 @@ class NetworkSim:
         self.wrapper_mode = wrapper_mode
         self.mode_zero_wrappers = 0
         self.fold_threshold = fold_threshold
+        self.fold_amortize = fold_amortize
         self.folds_deferred = 0
         if on_tick_overrun not in ("fifo", "abandon"):
             raise ValueError(f"unknown on_tick_overrun {on_tick_overrun!r}")
@@ -893,6 +905,17 @@ class NetworkSim:
             return 1
         return self.arena.claim(obj).bit_count()
 
+    def _verify_duration(self, signatures, starks, fallback_count):
+        """Receive verification for one delivery carrying this evidence.
+
+        With no `verify_cost` configured, the flat table is charged
+        `fallback_count` exactly as before -- and keeps the table's jitter,
+        which the composition path does not have.
+        """
+        if self.verify_cost is None:
+            return self.costs.duration(VERIFY_RECV, fallback_count)
+        return self.verify_cost.message(signatures, starks)
+
     def _send(self, sender_id, receiver_id, payload):
         """Queue a payload on the sender's egress server.
 
@@ -1053,8 +1076,16 @@ class NetworkSim:
             self.ingress_duplicate_bytes[message.receiver] += message.size_bytes()
             self._trace_duplicate(message, self._object_of(message).id)
             return
-        dep_count = self._dep_count(self._object_of(message))
-        duration = self.costs.duration(VERIFY_RECV, dep_count)
+        obj = self._object_of(message)
+        # A body delivers one thing to verify: the leaf's own evidence (a
+        # signature or a STARK witness by scheme), or an aggregate's
+        # recursive proof -- its dependency triples are data, not evidence.
+        if obj.kind == KIND_PQ:
+            signatures, starks = 1, 0
+        else:
+            signatures, starks = 0, 1
+        duration = self._verify_duration(signatures, starks,
+                                         self._dep_count(obj))
         if duration == 0.0:
             # Nothing to queue: admit and relay in the same instant. The
             # computed duration is authoritative, so a callable returning zero
@@ -1299,8 +1330,15 @@ class NetworkSim:
             # A proof that asserts less evidence than it costs is worse than the
             # evidence. Measured against the claim's own witnesses, which is the
             # thing the proof would replace.
+            # `fold_amortize` scales the witnesses' side, standing in for
+            # the fold's unpriced benefits, which accrue beyond this node's
+            # own uplink: a block slot carries the whole claim instead of
+            # one object, downstream receivers verify one proof instead of
+            # every witness, and nobody proves this coverage twice. One is
+            # the strictly local reading.
             witnesses = self._mode_zero_bytes(selection.claimed)
-            if witnesses < self.size_model.recursive_proof:
+            if (witnesses * self.fold_amortize
+                    < self.size_model.recursive_proof):
                 self.folds_deferred += 1
                 return None
         if len(live) == 1 and not live[0].is_leaf():
@@ -1688,7 +1726,16 @@ class NetworkSim:
                     message.sender, aggregate, self.arena,
                     self._supersede_strategy), "superseded")
             return
-        duration = self.costs.duration(VERIFY_RECV, core.dep_count)
+        if core.mode == 0:
+            # Mode 0 delivers the dependencies' own witnesses, and the
+            # receiver verifies each one: the mode saves the proof's bytes,
+            # never the verification of what stands behind them.
+            schemes = self.arena.schemes_in(core.tx_mask)
+            signatures = sum(1 for kind in schemes if kind == KIND_PQ)
+            starks = len(schemes) - signatures
+        else:
+            signatures, starks = 0, 1
+        duration = self._verify_duration(signatures, starks, core.dep_count)
         if duration == 0.0:
             if not witness_backed:
                 self.nodes[message.sender].note_proof_at_peer(
@@ -1703,7 +1750,8 @@ class NetworkSim:
             # sender's body belief formed at delivery. No proof belief forms,
             # so the next tick may resend full evidence.
             self.nodes[message.receiver].abandon_wrapper(
-                message.payload.core.proof_object_id)
+                message.payload.core.proof_object_id,
+                witness_backed=witness_backed)
             return
         # Accepted into the queue: this node will verify and retain the proof
         # (or abandon it only once its whole claim has settled, when the
@@ -1726,12 +1774,18 @@ class NetworkSim:
         payload = message.payload
         core = payload.core
         node = self.nodes[message.receiver]
+        # The class this job was checking, named again at completion: during
+        # an upgrade the same proof id has a witness job and a proof job in
+        # flight, and which evidence gets installed is the finished job's.
+        witness_backed = core.mode == 0 and not payload.proof_by_ref
         # Everything it claimed may have settled while it sat in the queue.
         if useful_count(core.tx_mask, node.known_discarded()) == 0:
-            node.abandon_wrapper(core.proof_object_id)
+            node.abandon_wrapper(core.proof_object_id,
+                                 witness_backed=witness_backed)
             self.discarded_after_work += 1
             return
-        bodies = node.finish_wrapper(core.proof_object_id)
+        bodies = node.finish_wrapper(core.proof_object_id,
+                                     witness_backed=witness_backed)
         aggregate = self.arena.objects.get(core.proof_object_id)
         if aggregate is None:
             return
@@ -1975,8 +2029,12 @@ class NetworkSim:
             self.duplicate_bytes += message.size_bytes()
             self.ingress_duplicate_bytes[message.receiver] += message.size_bytes()
             return
-        duration = self.costs.duration(VERIFY_RECV,
-                                       max(1, payload.included.bit_count()))
+        # A block notice carries the block itself -- the size model prices it
+        # at one recursive proof plus hash references -- so under composition
+        # pricing it pays one STARK-class verification before settlement is
+        # believed, like any other proof-carrying delivery.
+        duration = self._verify_duration(0, 1,
+                                         max(1, payload.included.bit_count()))
         if duration == 0.0:
             self._admit_block(message)
             return

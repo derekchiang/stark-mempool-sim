@@ -32,24 +32,14 @@ import argparse
 import statistics
 import sys
 
-from bench.common import (emit_json_record, print_table_header,
+from bench.common import (configuration, emit_json_record, print_table_header,
                           random_regular_overlay, schedule_horizon,
                           workload_parameters)
 from starksim.arena import KIND_PQ
 from starksim.costs import CostTable
 from starksim.netsim import NetworkSim
 from starksim.network import SizeModel, bytes_per_ms
-from starksim.presets import names as preset_names, preset
-
-
-def configuration(spec):
-    """`name` or `name+field=value...`: a preset with overrides applied."""
-    name, *overrides = spec.split("+")
-    settings = preset(name)
-    for override in overrides:
-        field, value = override.split("=", 1)
-        settings[field] = value
-    return settings
+from starksim.presets import names as preset_names
 
 
 def one_run(args, name, transactions, seed, return_sim=False):

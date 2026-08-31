@@ -106,6 +106,13 @@ signature behind it. Both errors flatter the cheaper mode. When a payload can
 carry alternative evidence for the same identity, the receiver must record
 *which*.
 
+**A callable cost is identified by probes, and probes can be blind.** The
+variant samples a callable `verify_recv` or `prove_recursive` at sizes 1 and
+100, so two callables that agree at both probes and differ elsewhere produce
+identical variants for materially different runs. Constants and the
+structured cost objects (`CircuitCost`, `NativeVerifyCost`) are identified
+field by field; an exotic callable is on the caller to attribute.
+
 **A variant that omits a parameter cannot attribute its own outcome.** Sampling
 a cost at one and a hundred inputs identifies a scalar, not a `CircuitCost`: the
 per-kind weights and the trace cap were invisible, so a run that proved happily

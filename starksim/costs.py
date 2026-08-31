@@ -15,8 +15,10 @@ Three kinds, deliberately few:
 - `prove_recursive`-- producing one aggregate
 - `build_block`    -- the proposer assembling a block
 
-Verification is one duration per received message. Splitting it by cryptographic
-scheme would model internals this simulator deliberately omits.
+Verification is one duration per received message by default.
+`NativeVerifyCost` replaces that flat duration with one priced by the evidence
+the message carries, because the native costs span orders of magnitude that
+one number cannot express.
 
 A value is either a constant or a callable taking a size. For recursive proving,
 the configured cost basis decides whether that size counts claimed dependencies
@@ -114,6 +116,48 @@ class CostTable:
         existing CPU work.
         """
         return self.base(kind, size) == 0.0
+
+
+class NativeVerifyCost:
+    """Receive verification priced by the evidence a message carries.
+
+    The flat `verify_recv` charges a 3 kB signature body and a wrapper full
+    of STARK witnesses the same milliseconds. Natively they are nothing
+    alike: verifying a bare leanSPHINCS signature is a few hundred hash
+    evaluations -- microseconds -- while verifying any STARK-class object (a
+    leanSTARK witness, a recursive proof) is a measured 14-17 ms. That is a
+    spread of two to three orders of magnitude, and at mainnet rates it
+    decides CPU feasibility, so it cannot live in one number.
+
+    Two prices, deliberately few: `per_signature` for one bare signature and
+    `per_stark` for one STARK-class verification, in milliseconds;
+    `per_message` is fixed overhead per verification performed -- a duplicate
+    that verifies nothing pays nothing. Wired through
+    `NetworkSim(verify_cost=...)`: when set, every delivery that creates a
+    verification job is priced by what it carries -- a mode 0 wrapper pays
+    for every witness it ships, and a block notice pays one STARK-class
+    verification for the block it delivers. There is no per-dependency
+    validity cache: a witness arriving again inside a mode 0 wrapper is
+    re-verified. `jitter_frac` does not apply to it.
+    """
+
+    __slots__ = ("per_signature", "per_stark", "per_message")
+
+    def __init__(self, per_signature, per_stark, per_message=0.0):
+        for name, value in (("per_signature", per_signature),
+                            ("per_stark", per_stark),
+                            ("per_message", per_message)):
+            if value < 0:
+                raise ValueError(f"{name} must be >= 0")
+        self.per_signature = float(per_signature)
+        self.per_stark = float(per_stark)
+        self.per_message = float(per_message)
+
+    def message(self, signatures, starks):
+        """Milliseconds to verify one delivery carrying this evidence."""
+        return (self.per_message
+                + self.per_signature * signatures
+                + self.per_stark * starks)
 
 
 # Hash-evaluation counts for the three things EIP-8288's recursive circuit

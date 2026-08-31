@@ -152,23 +152,58 @@ class TestReceivingAWrapper(unittest.TestCase):
         self.assertEqual(fresh, 0)
         self.assertEqual(node.view.duplicates, 1)
 
-    def test_a_proof_for_witnesses_in_flight_upgrades_without_paying(self):
+    def test_a_proof_for_witnesses_in_flight_pays_its_own_verification(self):
         # Witnesses are being checked; the recursive proof for the same claim
-        # arrives. No second verification is charged and no fresh body came,
-        # yet this copy is not a duplicate: it turns pending witnesses into a
-        # pending proof, so the claim now resolves by reference and finishing
-        # installs a verified proof rather than a witness-backed one.
+        # arrives. Checking a proof is different work from checking
+        # witnesses -- whatever a flat table charges for each -- so this copy
+        # is worth verifying even though it brings no fresh body, and it is
+        # not a duplicate: the claim now carries two pending jobs, and each
+        # completion installs only its own evidence.
         node = make_node()
         node.begin_wrapper(7, 0b0001, witness_backed=True)
         self.assertFalse(node.can_resolve_proof(7))
         worth, fresh, upgraded = node.begin_wrapper(7, 0b0001)
-        self.assertFalse(worth)
+        self.assertTrue(worth)
         self.assertEqual(fresh, 0)
         self.assertTrue(upgraded)
         self.assertEqual(node.view.duplicates, 0)
         self.assertTrue(node.can_resolve_proof(7))
+        node.finish_wrapper(7, witness_backed=True)
+        self.assertNotIn(7, node.view.verified_proofs)
+        self.assertTrue(node.can_resolve_proof(7))
         node.finish_wrapper(7)
         self.assertIn(7, node.view.verified_proofs)
+
+    def test_the_upgrade_completes_in_either_order(self):
+        node = make_node()
+        node.begin_wrapper(7, 0b0001, witness_backed=True)
+        node.begin_wrapper(7, 0b0001)
+        node.finish_wrapper(7)                       # the proof lands first
+        self.assertIn(7, node.view.verified_proofs)
+        node.finish_wrapper(7, witness_backed=True)  # witnesses trail in
+        self.assertIn(7, node.view.verified_proofs)
+        self.assertNotIn(7, node.view.witness_backed)
+
+    def test_a_second_proof_during_an_upgrade_is_a_duplicate(self):
+        node = make_node()
+        node.begin_wrapper(7, 0b0001, witness_backed=True)
+        node.begin_wrapper(7, 0b0001)
+        worth, fresh, upgraded = node.begin_wrapper(7, 0b0001)
+        self.assertFalse(worth)
+        self.assertFalse(upgraded)
+        self.assertEqual(node.view.duplicates, 1)
+
+    def test_an_abandoned_upgrade_reverts_to_witness_pending(self):
+        # The proof job overflowed: the claim falls back to what the still-
+        # running witness job can establish, never to a proof belief.
+        node = make_node()
+        node.begin_wrapper(7, 0b0001, witness_backed=True)
+        node.begin_wrapper(7, 0b0001)
+        node.abandon_wrapper(7)
+        self.assertFalse(node.can_resolve_proof(7))
+        node.finish_wrapper(7, witness_backed=True)
+        self.assertNotIn(7, node.view.verified_proofs)
+        self.assertIn(7, node.view.witness_backed)
 
     def test_witnesses_for_a_proof_in_flight_are_a_duplicate(self):
         # The reverse of the upgrade: the pending proof is the stronger

@@ -237,6 +237,7 @@ def variant(sim):
         "prove_cost_basis": sim.prove_cost_basis,
         "wrapper_mode": sim.wrapper_mode,
         "fold_threshold": sim.fold_threshold,
+        "fold_amortize": sim.fold_amortize,
         "on_tick_overrun": sim.on_tick_overrun,
         "proving_budget": sim.proving_budget,
         "cost_verify_recv": sim.costs.base(VERIFY_RECV),
@@ -245,6 +246,15 @@ def variant(sim):
         "cost_verify_recv_100": sim.costs.base(VERIFY_RECV, 100),
         "cost_prove_recursive_100": sim.costs.base(PROVE_RECURSIVE, 100),
         "cost_jitter": sim.costs.jitter_frac,
+        # -1 where no composition pricing is configured, the sentinel for
+        # "this run cannot answer this": the flat cost above is then the
+        # whole story.
+        "verify_sig_ms": (-1.0 if sim.verify_cost is None
+                          else sim.verify_cost.per_signature),
+        "verify_stark_ms": (-1.0 if sim.verify_cost is None
+                            else sim.verify_cost.per_stark),
+        "verify_message_ms": (-1.0 if sim.verify_cost is None
+                              else sim.verify_cost.per_message),
         "seed": str(sim.seed),
     }
     identity.update(_circuit_identity(sim))
@@ -384,6 +394,8 @@ CSV_COLUMNS = [
     "circuit_ms_per_hash", "circuit_overhead_hashes", "circuit_sphincs_hashes",
     "circuit_leanstark_hashes", "circuit_recursive_hashes",
     "circuit_trace_rows_per_hash", "circuit_trace_cap",
+    "verify_sig_ms", "verify_stark_ms", "verify_message_ms",
+    "fold_amortize",
 ]
 
 

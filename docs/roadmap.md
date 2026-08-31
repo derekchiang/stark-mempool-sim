@@ -7,10 +7,16 @@ Ranked items are tagged with the objective they serve
 
 ## Ranked experiments
 
-1. **(O1, O2)** Run a mainnet-shaped workload. Use 12-second slots, a justified mix of
-   post-quantum signature and privacy transactions, realistic arrival rates,
-   and an explicit compute calibration. This is the largest gap between the
-   current fixtures and a protocol-relevant operating point.
+1. **(O1, O2)** Deepen the mainnet-shaped workload. `bench.mainnet` now runs
+   12-second slots, a mixed transaction population, and leanVM-b-calibrated
+   proving and verification, and [results.md](results.md) carries the first
+   frontier from it. What remains: bursty arrivals (uniform spacing is a
+   stated limitation, and the frontier-adjacent cells sit at 93–96% CPU),
+   block messages
+   under `chain_notify="overlay"` so block verification is charged, a
+   justified mix beyond the swept share axis, and the two external
+   measurements the frontier hinges on — the leanSTARK witness weight
+   in-circuit and native verification of the real message mix.
 
 2. **(O1)** Sweep tick interval and degree while holding offered workload,
    capacities, and observation windows fixed. The recursive proof is paid per
@@ -34,6 +40,19 @@ Ranked items are tagged with the objective they serve
 
 ## Protocol and policy questions
 
+- Close the fold-amortization residue. The factor question is answered at
+  one fixture — [results.md](results.md): amortization (k of 8 or 16)
+  repairs crossover's aggregation-off collapse, the byte savings measured
+  alongside belong to the bandwidth levers, and at the slow anchor k=8
+  matches `always` seed-for-seed at 15 tx/s for 20% fewer bytes — but two
+  threads remain. Single-variable controls show a consistent same-base
+  edge for amortized crossover over `always` under slow proving
+  (probe-grade): more seeds or a paired analysis would say whether
+  deferring the narrowest folds genuinely spares constrained proving. And
+  the successor question is incentives, outside the current honest-uniform
+  model: with heterogeneous costs a rational node free-rides on upstream
+  folding whatever the threshold, and the measured inclusion gap between
+  `always` and `crossover` prices that problem.
 - Add a gossipsub-shaped relay that pushes bodies on a small mesh and announces
   to other peers. The current `flood` and `announce_fetch` policies bracket this
   design but do not represent it.

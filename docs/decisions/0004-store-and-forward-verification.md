@@ -28,8 +28,11 @@ relayed only after verification.
 `starksim.netsim.NetworkSim._egress_done` schedules delivery.
 `NetworkSim._deliver_body`, `_deliver_wrapper`, and `_deliver_block` submit
 `VERIFY_RECV` jobs. `_verify_done`, `_wrapper_verified`, and `_block_verified`
-apply results before subsequent propagation. `starksim.costs.CostTable.duration`
-prices the stage.
+apply results before subsequent propagation.
+`NetworkSim._verify_duration` prices the stage: the flat
+`starksim.costs.CostTable.duration` by default, or
+`starksim.costs.NativeVerifyCost` by the evidence the delivery carries when
+one is configured.
 
 ## Status
 

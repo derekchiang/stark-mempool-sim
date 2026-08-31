@@ -43,6 +43,23 @@ def mean_path(runs, *path):
     return statistics.fmean(values)
 
 
+def configuration(spec):
+    """`name` or `name+field=value...`: a preset with overrides applied.
+
+    Override values are passed on as strings; a field `NetworkSim` coerces,
+    such as `slot_length`, accepts a numeric string too, so the syntax is not
+    limited to policy names. A bench that owns some fields itself must check
+    the returned dict rather than rely on the syntax being too weak to
+    conflict.
+    """
+    name, *overrides = spec.split("+")
+    settings = preset(name)
+    for override in overrides:
+        field, value = override.split("=", 1)
+        settings[field] = value
+    return settings
+
+
 def add_preset_argument(parser):
     """`--preset NAME`: start from a named configuration."""
     parser.add_argument("--preset", default=None, choices=preset_names(),

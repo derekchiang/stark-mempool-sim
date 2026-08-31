@@ -75,6 +75,7 @@ python3 -m bench.sweep --axis fold_plan --values wide,binary
 python3 -m bench.v1_calibration  # the retired v1 model, and what replacing it cost
 python3 -m bench.levers          # do the bandwidth levers compose?
 python3 -m bench.throughput      # sustainable transaction rate, per named configuration
+python3 -m bench.mainnet         # 12 s slots, mixed PQ/privacy load, leanVM-b-calibrated proving
 ```
 
 Use `--help` on a module for its workload and sweep parameters. Keep the full
