@@ -24,23 +24,11 @@ From the repository root:
 python3 -m bench.overload --tps 1.5 --seeds 1
 ```
 
-This short fixture prints a load table and a recovery table:
-
-```text
-load sweep — what breaks first, measured at the end of the load
-offered/ceil  births   wire MB  drop msg  drop MB  queue MB  uplink  residency
-------------------------------------------------------------------------------
-        0.58      12     568.3         0      0.0      12.9  56.8%     100.0%
-
-recovery — does the backlog drain once the load stops
-offered/ceil  queue at load  queue after drain  drained  wire during drain  residency
--------------------------------------------------------------------------------------
-        0.58          12.9M               0.0M    1/1              65.4M     100.0%
-```
-
-The header records the topology, capacities, policy, bounds, and seed. Here
-`offered/ceil` compares accepted egress traffic with the physical uplink ceiling;
-the second table checks whether queued bytes drain after births stop.
+This is a smoke run that finishes in seconds. [quickstart.md](docs/quickstart.md)
+owns it: what its output means, the run that shows the mainnet-shaped result,
+a policy comparison in one flag, and the viewer, in five minutes.
+[explainer.md](docs/explainer.md) is the companion for what the simulator
+models and how to read a run.
 
 ## Named configurations
 
@@ -93,26 +81,15 @@ python3 -m tools.live_run
 python3 serve.py
 ```
 
-Then open <http://127.0.0.1:8000/viewer.html>. Use `serve.py` for a live trace;
-`python3 -m http.server` does not support the byte ranges needed for incremental
-polling.
+Then open <http://127.0.0.1:8000/viewer.html>. Whole-file polling works with
+`python3 -m http.server`, but re-downloads the trace on every poll; `serve.py`
+provides incremental byte ranges for a live trace.
 
 The runner takes a named configuration, a transaction rate, and the policy
-flags of `NetworkSim`; `--help` lists them all. Some runs worth watching:
-
-```sh
-python3 -m tools.live_run --preset high_throughput --tps 32        # the levers under load, ~128 per block
-python3 -m tools.live_run --preset eip_faithful --tps 32           # the EIP as written on the same load
-python3 -m tools.live_run --preset v1_equivalent --tps 8           # the retired model, free bytes, instant settlement
-python3 -m tools.live_run --tps 64 --egress-bytes 2000000          # overload: a small send buffer refusing messages
-python3 -m tools.live_run --relay-policy announce_fetch --tps 16   # one policy flag over the defaults
-python3 -m tools.live_run --tps 4 --follow-rate 1 --speed 0.25     # every transaction followed, at quarter speed
-```
-
-The viewer has three pages: charts of the whole run, the network coloured
-by what each node knows of the followed transaction, and that transaction's
-life on its own clock. The follow mode picks the transaction worth watching
-as the run goes; pin one from the ticker to hold it.
+flags of `NetworkSim`; `--help` lists them all, and without `--duration` it
+runs until Ctrl-C. [quickstart.md](docs/quickstart.md) gives a bounded run
+and a first pass through the viewer; [explainer.md](docs/explainer.md) has
+the reading order for its three pages.
 
 Check the viewer's data path and rendering with:
 
@@ -140,6 +117,8 @@ contracts are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation
 
+- [Quick start](docs/quickstart.md) — a clone to a run you can read, in five minutes.
+- [Explainer](docs/explainer.md) — what EIP-8288 proposes, what the simulator models, and how to read a run and the viewer.
 - [Model](docs/model.md) — current simulation semantics and non-goals.
 - [Architecture](docs/architecture.md) — module map, state ownership, and event walkthrough.
 - [Configuration](docs/configuration.md) — every parameter, policy and mode a run can select, with its default.
@@ -152,7 +131,7 @@ contracts are in [CONTRIBUTING.md](CONTRIBUTING.md).
 - [Pitfalls](docs/pitfalls.md) — concepts that are easy to conflate and instrumentation that lies.
 - [Architecture decisions](docs/decisions/) — current cross-cutting rationale tied to code symbols.
 - [Proposals](docs/proposals/) — candidate protocol mechanisms this simulator could evaluate; not specification.
-- [Historical records](docs/history/) — retired designs, the failure-mode journal, and adversarial-review transcripts; not current specification.
+- [Historical records](docs/history/) — retired designs and plans; not current specification.
 - [EIP-8288 snapshot](docs/eip-8288.md) — the draft text used as the protocol reference.
 
 ## License

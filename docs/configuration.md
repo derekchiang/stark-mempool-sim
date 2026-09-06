@@ -56,14 +56,14 @@ specify the choice.
 
 | Field | Value | The EIP |
 | --- | --- | --- |
-| `aggregation_interval` | `1000.0` | `AGGREGATION_INTERVAL = 1000` (`:53`). |
-| `aggregation_trigger` | `spread` | "Every `AGGREGATION_INTERVAL` milliseconds, they generate a new wrapper" (`:264`) — per node, with nothing synchronising them, so each node keeps its own clock. |
-| `wrapper_mode` | `recursive` | "Each wrapper contains exactly one STARK in mode 1" (`:250`); mode 0 "is intended to be used primarily by clients" (`:252`), not by mempool nodes in steady state. |
-| `fold_threshold` | `always` | "Per `AGGREGATION_INTERVAL`, a mempool node broadcasts exactly one wrapper containing all currently active transactions" (`:250`) — no condition on whether folding is worth it. |
-| `fold_plan` | `wide` | "with exactly one STARK covering all their dependencies" (`:250`) — one fold over everything, not a tree. |
+| `aggregation_interval` | `1000.0` | `AGGREGATION_INTERVAL = 1000` (`:51`). |
+| `aggregation_trigger` | `spread` | "Every `AGGREGATION_INTERVAL` milliseconds, they generate a new wrapper" (`:262`) — per node, with nothing synchronising them, so each node keeps its own clock. |
+| `wrapper_mode` | `recursive` | "Each wrapper contains exactly one STARK in mode 1" (`:248`); mode 0 "is intended to be used primarily by clients" (`:250`), not by mempool nodes in steady state. |
+| `fold_threshold` | `always` | "Per `AGGREGATION_INTERVAL`, a mempool node broadcasts exactly one wrapper containing all currently active transactions" (`:248`) — no condition on whether folding is worth it. |
+| `fold_plan` | `wide` | "with exactly one STARK covering all their dependencies" (`:248`) — one fold over everything, not a tree. |
 | `selection_strategy` | `eip_priority` | The four-tier order at `:266`–`:271`, for a node that cannot aggregate everything it saw. |
-| `inclusion_policy` | `body_required` | "Build the execution payload including all included transactions" (`:322`) — the payload carries every one of them, so a proof alone cannot conjure a body. |
-| `wrapper_economy` | `full` | The EIP specifies substituting a hash for a transaction already sent (`:264`), which this model always does; it says nothing about withholding *proof* bytes, so nothing is withheld. |
+| `inclusion_policy` | `body_required` | "Build the execution payload including all included transactions" (`:320`) — the payload carries every one of them, so a proof alone cannot conjure a body. |
+| `wrapper_economy` | `full` | The EIP specifies substituting a hash for a transaction already sent (`:262`), which this model always does; it says nothing about withholding *proof* bytes, so nothing is withheld. |
 | `supersede_policy` | `keep_all` | Not specified. Retiring a peer's older wrapper is a modelling choice, and an unsafe one by default: a newer claim can be narrower than the one it replaces. |
 | `relay_policy` | `flood` | Not specified. The EIP describes what a wrapper contains, not how raw objects reach a node. |
 | `prove_cost_basis` | `deps` | Not specified — a cost model, not protocol. Prices a job by its output's dependency count. |
@@ -214,7 +214,7 @@ belongs in [results.md](results.md).
 | Field | Default | Choices | What it decides |
 | --- | --- | --- | --- |
 | `slot_length` | `4000.0` | | Ms per slot. |
-| `block_budget` | `5` | | Objects a block may include. What a block settles is this times the claims per selected object, and the second factor is the one that binds. |
+| `block_budget` | `5` | | A fold budget: selecting `k` objects costs `k - 1` folds, so the proposer may select at most `block_budget + 1` objects. What a block settles is that count times the claims per selected object, and the second factor is the one that binds. |
 | `proposer_mode` | `fixed` | `fixed`, `rotating`, `random`, `dedicated` | Who builds each slot, and whether that node is a mempool node at all. `dedicated` is a fixed proposer that never folds. Validated by `ProposerSchedule`, not by `NetworkSim`. |
 | `proposer_id` | `0` | | The builder under `fixed`. |
 | `pin_own_aggregate` | `True` | | Whether a bounded candidate set may evict the node's own aggregate. The EIP's first selection priority is a node's own aggregate from the previous round, which presumes it still holds it; exempting an object means the set really holds one more. Requires `candidate_limit`. |

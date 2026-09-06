@@ -39,6 +39,8 @@ evidence contract in [docs/results.md](docs/results.md) and the traps in
 - viewer.html: live view / replay of trace.jsonl
 
 # Files in docs/:
+- quickstart.md: the newcomer's commands, in order; owns no facts
+- explainer.md: EIP-8288, the model's moving parts, and how to read a run and the viewer; owns no facts
 - model.md: READ FIRST -- current simulation semantics and non-goals
 - architecture.md: module map, state ownership, event walkthrough, extension points
 - configuration.md: every selectable parameter, policy and mode, with defaults
@@ -51,5 +53,5 @@ evidence contract in [docs/results.md](docs/results.md) and the traps in
 - pitfalls.md: concepts that are easy to conflate and instrumentation that lies
 - decisions/: current architecture decisions and code locations
 - proposals/: candidate protocol mechanisms to evaluate; not specification
-- history/: retired designs, build log, journal, plans, and review transcripts
+- history/: retired designs and plans; not current specification
 - eip-8288.md: snapshot of the draft EIP used by the model

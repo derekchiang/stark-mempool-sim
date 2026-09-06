@@ -98,7 +98,11 @@ The runner writes `trace.jsonl` by default. `--speed 0.25` runs in slow motion,
 output location. With the default path, opening the viewer URL above is enough;
 it polls for appended byte ranges and applies only complete JSONL records.
 
-Trace volume depends mainly on the egress buffer and counter interval:
+Trace volume grows with run duration, node count, message traffic, and the
+followed-transaction rate. The per-node counter grid adds a regular
+contribution set by node count and counter interval. The egress buffer changes
+whether attempted sends become send or drop records; it is not a sampling
+control:
 
 - `--egress-bytes` defaults to two wrapper **emission rounds**, derived from the
   degree, because one round is `degree x recursive_proof` — 2.1 MB at degree 8 —
@@ -117,11 +121,11 @@ that is active, idle, crashed, or killed.
 
 The charts page has two sections. The first is about the whole network:
 residency by birth cohort, mean residency by hop distance from each object's
-own entry, utilization and queue dispersion across nodes, per-kind
-offered/sent/ingress bytes, and drops. The second is about one transaction
-and one object: the followed transaction's knowledge classes, the selected
-object's reach and residency over every other object's residency, and its
-residency by hop distance. The bar above the second section carries the two
+own entry, utilization and queue dispersion across nodes, sent bytes split by
+payload kind, offered and ingress totals, and drops. The second is about one
+transaction and one object: the followed transaction's knowledge classes, the
+selected object's reach and residency over every other object's residency, and
+its residency by hop distance. The bar above the second section carries the two
 selectors and one note for the section. Following a transaction also selects
 its own proof object until an object is chosen by hand, so the section
 describes one thing unless the reader asks otherwise.
@@ -257,3 +261,16 @@ npx playwright test
 Reducer checks catch wrong numbers even when the page looks plausible. Browser
 checks catch blank canvases, hidden-panel CSS errors, and data that never reaches
 the screen even when the reducer state is correct.
+
+The screenshots in [explainer.md](explainer.md) are of the same fixture, taken
+by the same toolchain, and are regenerated rather than re-shot:
+
+```sh
+node tools/shoot_viewer.js
+```
+
+writes `docs/images/viewer-{charts,network,transaction}.png` from a replay
+driven the way the render checks drive it. Run it after any change to
+`viewer.html` or to the fixture, and commit the result; two runs on one
+machine give identical bytes, so a diff in the pictures is a change in the
+page.

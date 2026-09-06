@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <title>The protocol on the left, the model on the right, and what is not modelled</title>
+  <!-- Drawn on its own light card so it reads the same on a light or a dark
+       page. Colours follow viewer.html. -->
+  <rect width="960" height="560" rx="12" fill="#f5f1e8"/>
+
+  <g font-weight="bold" fill="#2a2721" font-size="15">
+    <text x="40" y="44">EIP-8288 proposes</text>
+    <text x="520" y="44">starksim represents it as</text>
+  </g>
+
+  <!-- rows: protocol left, model right -->
+  <g stroke="#9a9384" stroke-width="1" fill="#ece6d8">
+    <rect x="40" y="64" width="400" height="74" rx="6"/>
+    <rect x="40" y="152" width="400" height="90" rx="6"/>
+    <rect x="40" y="256" width="400" height="74" rx="6"/>
+    <rect x="40" y="344" width="400" height="74" rx="6"/>
+  </g>
+  <g stroke="#12a37e" stroke-width="1" fill="#ffffff">
+    <rect x="520" y="64" width="400" height="74" rx="6"/>
+    <rect x="520" y="152" width="400" height="90" rx="6"/>
+    <rect x="520" y="256" width="400" height="74" rx="6"/>
+    <rect x="520" y="344" width="400" height="74" rx="6"/>
+  </g>
+  <!-- arrows -->
+  <g stroke="#9a9384" stroke-width="1.5" fill="#9a9384">
+    <line x1="444" y1="101" x2="508" y2="101"/><polygon points="516,101 506,96 506,106"/>
+    <line x1="444" y1="197" x2="508" y2="197"/><polygon points="516,197 506,192 506,202"/>
+    <line x1="444" y1="293" x2="508" y2="293"/><polygon points="516,293 506,288 506,298"/>
+    <line x1="444" y1="381" x2="508" y2="381"/><polygon points="516,381 506,376 506,386"/>
+  </g>
+
+  <g fill="#2a2721">
+    <text x="52" y="86" font-weight="bold">a transaction with dependencies</text>
+    <text x="52" y="104" font-size="12">a post-quantum signature, or a STARK witness,</text>
+    <text x="52" y="120" font-size="12">each large and each verified at every hop today</text>
+
+    <text x="52" y="174" font-weight="bold">a wrapper, once per interval, per peer</text>
+    <text x="52" y="192" font-size="12">transactions, or hashes the peer already has, plus either</text>
+    <text x="52" y="208" font-size="12">mode 0: the raw witnesses, or</text>
+    <text x="52" y="224" font-size="12">mode 1: one recursive proof, whatever the count</text>
+
+    <text x="52" y="278" font-weight="bold">a peer verifies the proof, not the signatures</text>
+    <text x="52" y="296" font-size="12">folds what it learned into its own next proof,</text>
+    <text x="52" y="312" font-size="12">forwards its own wrapper; proofs grow recursively</text>
+
+    <text x="52" y="366" font-weight="bold">a builder proves once more</text>
+    <text x="52" y="384" font-size="12">over the transactions it includes; the block</text>
+    <text x="52" y="400" font-size="12">carries a single proof for all of them</text>
+  </g>
+
+  <g fill="#2a2721">
+    <text x="532" y="86" font-weight="bold">a leaf</text>
+    <text x="532" y="104" font-size="12">kind q or p, a fee, an expiry, one bit in every mask;</text>
+    <text x="532" y="120" font-size="12">bytes on the wire, a duration to verify, never invalid</text>
+
+    <text x="532" y="174" font-weight="bold">a per-peer payload</text>
+    <text x="532" y="192" font-size="12">bodies or hashes by what the sender believes the peer holds,</text>
+    <text x="532" y="208" font-size="12">plus, in mode 1, a proof term: a claim mask and 262,144 B by default,</text>
+    <text x="532" y="224" font-size="12">per peer per emission; in mode 0, the witnesses, verified one by one</text>
+
+    <text x="532" y="278" font-weight="bold">a CPU job, then a view update</text>
+    <text x="532" y="296" font-size="12">verification of configured duration on one CPU, then</text>
+    <text x="532" y="312" font-size="12">admission into NodeView; the next tick selects and folds</text>
+
+    <text x="532" y="366" font-weight="bold">greedy selection from one node's view</text>
+    <text x="532" y="384" font-size="12">by claims, within a fold budget, bodies required;</text>
+    <text x="532" y="400" font-size="12">attempted and newly included recorded separately</text>
+  </g>
+
+  <!-- not modelled -->
+  <rect x="40" y="440" width="880" height="92" rx="6" fill="#e6dfd1" stroke="#9a9384" stroke-dasharray="5 4"/>
+  <text x="52" y="464" font-weight="bold" fill="#6b6558">not modelled, on purpose</text>
+  <text x="52" y="486" font-size="12" fill="#6b6558">proof validity or soundness · adversaries, free-riders, offline or heterogeneous nodes · execution, nonces, ordering, state conflicts</text>
+  <text x="52" y="504" font-size="12" fill="#6b6558">FOCIL and inclusion lists · reorgs and fork choice · a fee market beyond a scalar · validation against a client or a testnet</text>
+  <text x="52" y="522" font-size="11" fill="#6b6558">every participant is honest, identical, online and altruistic; every number in results.md inherits this list</text>
+</svg>

@@ -177,6 +177,11 @@
            font: inherit; font-size: 11px; }
   .pdesc { color: var(--ink2); font-size: 11px; line-height: 1.4;
            margin: 4px 0 6px; max-width: 90ch; }
+  /* The page-level orientation, opened from the `?` beside the tabs. Its
+     `hidden` must win over any author display, the way the tabs' do. */
+  #pagehelp { padding: 0 16px 6px; margin: 0; max-width: 100ch; }
+  #pagehelp[hidden] { display: none; }
+  #pagehelp p { margin: 0 0 5px; }
 </style>
 
 <header>
@@ -192,7 +197,27 @@
   <button id="theme" class="tog">◐ theme</button>
   <span class="tabs"><button id="tab-charts" class="tog on">charts</button
     ><button id="tab-network" class="tog">network</button
-    ><button id="tab-transaction" class="tog">transaction</button></span>
+    ><button id="tab-transaction" class="tog">transaction</button
+    ><button id="help-page" class="tog" title="how to read this">?</button></span>
+</div>
+<div class="pdesc" id="pagehelp" hidden>
+  <p><b>How to read this.</b> Everything drawn here is reduced from
+  <code>trace.jsonl</code>: the page replays a record, it is not a window on a
+  running simulator, and what was not traced cannot appear. The line under the
+  title is the trace header; read it first, since every panel is conditional
+  on it.</p>
+  <p><b>charts</b> asks what is binding: the whole network first, then one
+  followed transaction and one object below the scope bar. <b>network</b>
+  shows where that transaction is known: nodes coloured by the evidence they
+  hold, categories rather than a scale, green edges for how it spread, red
+  arrows for deliveries that taught their receiver nothing.
+  <b>transaction</b> puts the same transaction on its own clock, one row per
+  node in the order they learned of it.</p>
+  <p><code>auto</code> follow picks the transaction and moves on when its
+  story ends or after the set number of slots; choosing a transaction pins
+  it, and ‹ › step through the list. Every panel's
+  <code>?</code> says what it draws and how; its <code>table</code> gives the
+  values behind the pixels.</p>
 </div>
 
 <div id="netbar" hidden>
@@ -3005,6 +3030,9 @@ function setTab(name) {
 }
 for (const tab of ["charts", "network", "transaction"])
   $("tab-" + tab).onclick = () => setTab(tab);
+$("help-page").onclick = function () {
+  $("pagehelp").hidden = !$("pagehelp").hidden;
+};
 $("netmetric").innerHTML = NET_METRICS.map(spec =>
   '<option value="' + spec.id + '">' + spec.label + "</option>").join("");
 $("netmetric").value = netMetric;

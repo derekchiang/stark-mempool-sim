@@ -56,6 +56,23 @@ Ranked items are tagged with the objective they serve
 - Add a gossipsub-shaped relay that pushes bodies on a small mesh and announces
   to other peers. The current `flood` and `announce_fetch` policies bracket this
   design but do not represent it.
+- **(O1, O5)** Try a deadline-triggered aggregation cadence. The clocked
+  triggers start a fold at the tick and emit when its proof completes, so
+  emission is at most once per interval and a neighbour's wrapper waits, on
+  average, half an interval for the receiver's next tick before it is folded;
+  under `aligned` every node folds before any same-round wrapper has arrived.
+  A fourth `aggregation_trigger` would treat the interval boundary as the
+  target *completion* time: at each event that changes what a node holds,
+  estimate the proving time of the current selection — selection already
+  prices it against the budget — and start at the latest moment that still
+  meets the deadline. Expected, as hypotheses: periodic emission, so the
+  standing cost `degree x recursive_proof / interval` holds rather than
+  bounds; folds no staler than one proof duration at emission; today's
+  behaviour once the estimate exceeds the interval. The cost is trusting an
+  estimate on a CPU shared with verification, and the margin that needs is
+  the measurement. The `when_ready` hooks already re-evaluate at those
+  events; what is new is one latest-start event per interval. Compare against
+  `spread` on the mainnet fixture for delay, inclusion and offered bytes.
 - Establish a request-timeout recommendation and validity range from measured
   fetch-latency distributions. A timeout must distinguish useful recovery from
   retries caused by congestion-delayed responses.

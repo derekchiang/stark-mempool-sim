@@ -331,3 +331,18 @@ test("the config header reached the page", async ({ page }) => {
   const bound = await page.evaluate(() => feed.cfg.egress_queue_bytes);
   expect(bound).toBe(400000);
 });
+
+test("the page help opens beside the tabs and closes again", async ({ page }) => {
+  await loadFinished(page);
+  // Closed by default: the orientation is for a first visit, and a panel
+  // that is always open would push every chart down for every visit after.
+  await expect(page.locator("#pagehelp")).toBeHidden();
+  await page.click("#help-page");
+  await expect(page.locator("#pagehelp")).toBeVisible();
+  // It names the three pages it orients: a help that lost a tab is stale.
+  for (const tab of ["charts", "network", "transaction"]) {
+    await expect(page.locator("#pagehelp")).toContainText(tab);
+  }
+  await page.click("#help-page");
+  await expect(page.locator("#pagehelp")).toBeHidden();
+});

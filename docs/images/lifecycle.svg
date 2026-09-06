@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <title>One transaction's life: entry node, its uplink, a peer's CPU, the proposer</title>
+  <!-- Drawn on its own light card so it reads the same on a light or a dark
+       page. Colours follow viewer.html: green for held evidence, blue for a
+       body, amber for verification, grey for settled. -->
+  <rect width="960" height="560" rx="12" fill="#f5f1e8"/>
+
+  <!-- lane bands -->
+  <g fill="#ece6d8">
+    <rect x="150" y="60" width="790" height="90" rx="6"/>
+    <rect x="150" y="170" width="790" height="90" rx="6"/>
+    <rect x="150" y="280" width="790" height="110" rx="6"/>
+    <rect x="150" y="410" width="790" height="90" rx="6"/>
+  </g>
+  <g fill="#2a2721" font-weight="bold">
+    <text x="20" y="110">entry node</text>
+    <text x="20" y="220">its uplink</text>
+    <text x="20" y="340">a peer's CPU</text>
+    <text x="20" y="460">the proposer</text>
+  </g>
+  <g fill="#6b6558" font-size="11">
+    <text x="20" y="128">decides, schedules nothing</text>
+    <text x="20" y="238">one finite egress server</text>
+    <text x="20" y="358">verify, prove, build: one queue</text>
+    <text x="20" y="478">builds from its own view</text>
+  </g>
+
+  <!-- time axis -->
+  <line x1="150" y1="530" x2="940" y2="530" stroke="#9a9384" stroke-width="1.5"/>
+  <polygon points="940,530 930,525 930,535" fill="#9a9384"/>
+  <text x="150" y="548" fill="#6b6558" font-size="11">simulated time, milliseconds; nothing here is wall clock</text>
+
+  <!-- the aggregation tick and the slot boundary, across every lane -->
+  <line x1="520" y1="50" x2="520" y2="510" stroke="#9a9384" stroke-dasharray="4 4"/>
+  <text x="524" y="48" fill="#6b6558" font-size="11">peer's tick</text>
+  <line x1="860" y1="50" x2="860" y2="510" stroke="#9a9384" stroke-dasharray="4 4"/>
+  <text x="864" y="48" fill="#6b6558" font-size="11">slot boundary</text>
+
+  <!-- entry node lane -->
+  <circle cx="175" cy="105" r="7" fill="#2d73d8"/>
+  <text x="188" y="100" fill="#2a2721">birth: body and dependencies</text>
+  <text x="188" y="116" fill="#6b6558" font-size="11">admitted at its entry, one bit in every coverage mask</text>
+  <path d="M175 112 L175 195" stroke="#2d73d8" stroke-width="1.5" fill="none"/>
+  <polygon points="175,200 170,190 180,190" fill="#2d73d8"/>
+
+  <!-- uplink lane: serial fan-out -->
+  <g fill="#2d73d8">
+    <rect x="175" y="200" width="70" height="18" rx="3"/>
+    <rect x="245" y="200" width="70" height="18" rx="3" opacity="0.8"/>
+    <rect x="315" y="200" width="70" height="18" rx="3" opacity="0.6"/>
+  </g>
+  <g fill="#ffffff" font-size="11">
+    <text x="183" y="213">to peer A</text>
+    <text x="253" y="213">to peer B</text>
+    <text x="323" y="213">to peer C</text>
+  </g>
+  <text x="175" y="240" fill="#6b6558" font-size="11">one copy per peer, serialised in turn: fan-out is paid by the sender, in order</text>
+  <!-- link latency to the peer -->
+  <path d="M245 218 C 260 260, 275 280, 300 300" stroke="#9a9384" stroke-width="1.5" stroke-dasharray="3 3" fill="none"/>
+  <polygon points="303,304 293,300 300,293" fill="#9a9384"/>
+  <text x="258" y="270" fill="#6b6558" font-size="11">link latency</text>
+
+  <!-- peer CPU lane -->
+  <rect x="300" y="300" width="80" height="20" rx="3" fill="#d29413"/>
+  <text x="306" y="314" fill="#ffffff" font-size="11">verify_recv</text>
+  <circle cx="386" cy="310" r="5" fill="#12a37e"/>
+  <text x="396" y="314" fill="#2a2721" font-size="11">admitted, relayed on</text>
+  <!-- a second arrival queued behind proving -->
+  <rect x="520" y="300" width="180" height="20" rx="3" fill="#12a37e"/>
+  <text x="526" y="314" fill="#ffffff" font-size="11">prove: fold the selection</text>
+  <rect x="700" y="300" width="48" height="20" rx="3" fill="#d29413"/>
+  <text x="704" y="314" fill="#ffffff" font-size="10">verify</text>
+  <text x="520" y="340" fill="#2a2721" font-size="11">tick: prune, select, plan, queue the proving job</text>
+  <text x="520" y="356" fill="#6b6558" font-size="11">claim frozen here, against what the peer knew</text>
+  <text x="520" y="372" fill="#6b6558" font-size="11">an arrival waits behind the fold: one CPU</text>
+  <!-- emission -->
+  <circle cx="700" cy="310" r="0"/>
+  <path d="M700 296 L700 270" stroke="#12a37e" stroke-width="1.5" fill="none"/>
+  <polygon points="700,265 695,275 705,275" fill="#12a37e"/>
+  <text x="708" y="272" fill="#2a2721" font-size="11">proof done: one wrapper per peer,</text>
+  <text x="708" y="286" fill="#2a2721" font-size="11">bodies or hashes plus the proof</text>
+
+  <!-- proposer lane: the wrapper reaches the proposer like any peer, over
+       the peer's uplink and the link, and is verified and admitted before
+       the boundary; only then can the block select it -->
+  <path d="M700 320 C 720 380, 750 420, 778 430" stroke="#12a37e" stroke-width="1.5" stroke-dasharray="3 3" fill="none"/>
+  <text x="596" y="404" fill="#6b6558" font-size="11">wrapper: the peer's uplink, then the link</text>
+  <rect x="778" y="430" width="54" height="20" rx="3" fill="#d29413"/>
+  <text x="783" y="444" fill="#ffffff" font-size="10">verify</text>
+  <circle cx="840" cy="440" r="5" fill="#12a37e"/>
+  <rect x="862" y="430" width="70" height="20" rx="3" fill="#9a9384"/>
+  <text x="868" y="444" fill="#ffffff" font-size="11">build block</text>
+  <text x="620" y="470" fill="#2a2721" font-size="11">the proposer verifies and admits the wrapper like any peer; at the</text>
+  <text x="620" y="486" fill="#2a2721" font-size="11">boundary it selects from what it holds, by claims, within a fold budget</text>
+</svg>

@@ -835,7 +835,7 @@ to correlate. It takes a deadline to make the block scarce again.
 
 ## What is not here
 
-Heterogeneous links and CPUs, a mainnet-shaped load, the supersede-policy
-comparison *where bandwidth binds* — it is raced above only where aggregation
-does — and everything about adversarial or self-interested participation.
+Heterogeneous links and CPUs, the supersede-policy comparison *where bandwidth
+binds* — it is raced above only where aggregation does — and everything about
+adversarial or self-interested participation.
 [roadmap.md](roadmap.md) lists these with what each would settle.
