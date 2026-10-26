@@ -149,6 +149,22 @@ class TestJsonRecords(unittest.TestCase):
             variant["circuit_ms_per_hash"],
             2 * base["variant"]["circuit_ms_per_hash"])
 
+    def test_the_leanmultisig_calibration_reproduces_its_measurements(self):
+        # With its own default anchor the calibration must price folds at
+        # the measured times: 58 ms + 90 ms per nested proof + 1.8 ms per
+        # signature, the fixed term included.
+        prover = mainnet.calibrated_prover(mainnet.LEANMULTISIG_PAIRWISE_MS,
+                                           1, "leanmultisig")
+        self.assertAlmostEqual(prover.duration(0, 0, 2), 238.0)
+        self.assertAlmostEqual(prover.duration(0, 0, 16), 58.0 + 16 * 90.0)
+        self.assertAlmostEqual(prover.duration(256, 0, 2),
+                               238.0 + 256 * 1.8)
+        record = bench_records(SMALL + ["--tps", "2", "--privacy-share", "0.5",
+                                        "--calibration", "leanmultisig"])[0]
+        self.assertEqual(record["workload"]["calibration"], "leanmultisig")
+        self.assertEqual(record["workload"]["anchor_ms"], 238.0)
+        self.assertEqual(record["variant"]["circuit_overhead_hashes"], 58.0)
+
     def test_cpu_utilisation_does_not_measure_the_drain(self):
         # Utilisation is read at the end of the birth window: read at the
         # horizon it would count the drain's idle time in its denominator

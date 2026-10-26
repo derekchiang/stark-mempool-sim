@@ -24,6 +24,13 @@ absolute durations here carry at least that error. `--anchor-ms` is where
 scale uncertainty lives — a larger anchor stands for a slower machine, and
 417 ms is a fast desktop.
 
+`--calibration leanmultisig` replaces those weights with proving times
+measured on leanMultisig dd51f0f (Apple M4 Max, `--log-inv-rate 2`): 58 ms
+per fold, 90 ms per nested proof and 1.8 ms per leanSPHINCS signature, from
+folds of 1-16 children and of two children plus 16-256 raw signatures. Its
+2-to-1 fold is 238 ms; leanMultisig has no leanSTARK-witness input, so
+`--leanstark-factor` stays a multiple of the nested-proof weight.
+
 The leanSTARK witness weight is NOT measured anywhere; `--leanstark-factor`
 expresses it as a multiple of the nested-proof weight. The default band of
 1-2 reflects that a WHIR-family verifier's work grows slowly with the size
@@ -76,6 +83,29 @@ LEANVM_B_SPHINCS_CYCLES = 2_677_883 / 245
 LEANVM_B_RECURSIVE_CYCLES = 746_499 / 2
 LEANVM_B_PAIRWISE_MS = 417.0
 
+# leanMultisig at dd51f0f, measured on an Apple M4 Max (16 cores) with
+# `cargo leanvm --log-inv-rate 2`, in milliseconds. Folds of 1-16 child
+# proofs fit 58 ms + 90 ms per child; raw leanSPHINCS signatures folded in
+# beside two children add 1.8 ms each. The weights are milliseconds rather
+# than cycles because cycles undercount signature work: a child is ~123
+# signatures' worth of cycles but ~50 signatures' worth of proving time.
+# The fixed term is what a cycle-anchored calibration has no place for.
+LEANMULTISIG_OVERHEAD_MS = 58.0
+LEANMULTISIG_SPHINCS_MS = 1.8
+LEANMULTISIG_RECURSIVE_MS = 90.0
+LEANMULTISIG_PAIRWISE_MS = (LEANMULTISIG_OVERHEAD_MS
+                            + 2 * LEANMULTISIG_RECURSIVE_MS)
+
+# Each calibration: (overhead, signature, nested-proof weight, the 2-to-1
+# fold its own measurement implies). The weights only fix ratios;
+# `anchored_on_pairwise_fold` attaches the millisecond scale.
+CALIBRATIONS = {
+    "leanvm-b": (0.0, LEANVM_B_SPHINCS_CYCLES, LEANVM_B_RECURSIVE_CYCLES,
+                 LEANVM_B_PAIRWISE_MS),
+    "leanmultisig": (LEANMULTISIG_OVERHEAD_MS, LEANMULTISIG_SPHINCS_MS,
+                     LEANMULTISIG_RECURSIVE_MS, LEANMULTISIG_PAIRWISE_MS),
+}
+
 # Fields this bench derives from its own flags or its calibration. A preset
 # (or a `+field=value` override) reaching one of these would relabel the run
 # without changing its record -- the header printing an uplink the run does
@@ -104,17 +134,20 @@ def mixed_kinds(transactions, privacy_share, seed):
     return kinds
 
 
-def calibrated_prover(anchor_ms, leanstark_factor):
-    # Weights are cycles, not hashes; `anchored_on_pairwise_fold` divides the
-    # anchor by a 2-to-1 fold's total, so the unit cancels. The infinite trace
-    # cap records "no ceiling known" (docstring: the EIP's ceiling belongs to
-    # a different stack), and rows-per-unit 1 records only that the unit is
-    # a VM cycle -- with no cap it prices nothing.
+def calibrated_prover(anchor_ms, leanstark_factor, calibration="leanvm-b"):
+    # Weights are cycles (leanvm-b) or milliseconds (leanmultisig), not
+    # hashes; `anchored_on_pairwise_fold` divides the anchor by a 2-to-1
+    # fold's total, so the unit cancels. The infinite trace cap records "no
+    # ceiling known" (docstring: the EIP's ceiling belongs to a different
+    # stack), and rows-per-unit 1 records only the unit -- with no cap it
+    # prices nothing.
+    overhead, signature, recursive, _ = CALIBRATIONS[calibration]
     return CircuitCost.anchored_on_pairwise_fold(
         anchor_ms,
-        sphincs_hashes=LEANVM_B_SPHINCS_CYCLES,
-        leanstark_hashes=LEANVM_B_RECURSIVE_CYCLES * leanstark_factor,
-        recursive_hashes=LEANVM_B_RECURSIVE_CYCLES,
+        overhead_hashes=overhead,
+        sphincs_hashes=signature,
+        leanstark_hashes=recursive * leanstark_factor,
+        recursive_hashes=recursive,
         trace_rows_per_hash=1.0, trace_cap=math.inf)
 
 
@@ -141,8 +174,8 @@ def one_run(args, name, transactions, privacy_share, leanstark_factor,
     settings = dict(seed=seed, capacity=bytes_per_ms(args.uplink_mbps),
                     size_model=SizeModel(),
                     costs=CostTable(
-                        prove_recursive=calibrated_prover(anchor_ms,
-                                                          leanstark_factor),
+                        prove_recursive=calibrated_prover(
+                            anchor_ms, leanstark_factor, args.calibration),
                         seed=seed),
                     verify_cost=NativeVerifyCost(sig_ms, stark_ms),
                     egress_queue_bytes=args.egress_bytes or None,
@@ -212,10 +245,19 @@ def main():
                         help="in-circuit weight of one leanSTARK witness as a "
                              "multiple of the nested-proof weight; an "
                              "unmeasured assumption, default band 1-2")
-    parser.add_argument("--anchor-ms", default=str(LEANVM_B_PAIRWISE_MS),
+    parser.add_argument("--calibration", choices=sorted(CALIBRATIONS),
+                        default="leanvm-b",
+                        help="whose measurements set the circuit weights: "
+                             "leanvm-b (cycle counts, no per-fold overhead) "
+                             "or leanmultisig (dd51f0f proving times: 58 ms "
+                             "per fold, 90 ms per nested proof, 1.8 ms per "
+                             "signature)")
+    parser.add_argument("--anchor-ms", default=None,
                         help="measured ms for one 2-to-1 fold; the hardware "
-                             "axis -- 417 is leanVM-b's Mac M4 Max, larger "
-                             "stands for a slower machine")
+                             "axis -- the default is the calibration's own "
+                             "Mac M4 Max figure (417 for leanvm-b, 238 for "
+                             "leanmultisig), larger stands for a slower "
+                             "machine")
     parser.add_argument("--verify-sig-ms", default="0.1",
                         help="native ms to verify one bare signature; "
                              "unmeasured, and a mode 0 wrapper multiplies it "
@@ -251,6 +293,8 @@ def main():
         if not 0.0 <= share <= 1.0:
             parser.error(f"--privacy-share {share:g}: a share lies in [0, 1]")
     factors = floats(args.leanstark_factor)
+    if args.anchor_ms is None:
+        args.anchor_ms = str(CALIBRATIONS[args.calibration][3])
     anchors = floats(args.anchor_ms)
     sig_prices = floats(args.verify_sig_ms)
     stark_prices = floats(args.verify_stark_ms)
@@ -307,8 +351,14 @@ def main():
           f"uplink={args.uplink_mbps:.0f} Mbit/s latency={args.latency:.0f} ms "
           f"slot={args.slot_length / 1000:g} s, born over {args.slots} slots, "
           f"{args.drain_slots} drain, seeds={args.seeds}")
-    print(f"circuit weights (leanVM-b cycles): signature~10930 nested~373250; "
-          f"leanSTARK witness = factor x nested, unmeasured")
+    if args.calibration == "leanmultisig":
+        print("circuit weights (leanMultisig dd51f0f ms): overhead 58 "
+              "signature 1.8 nested 90; leanSTARK witness = factor x nested, "
+              "unmeasured")
+    else:
+        print("circuit weights (leanVM-b cycles): signature~10930 "
+              "nested~373250; leanSTARK witness = factor x nested, "
+              "unmeasured")
     print(f"egress bound {egress_note} per node, proving budget {budget_note}, "
           f"fees cycle 0-4")
     print(f"native verify swept: sig {args.verify_sig_ms} ms, "
